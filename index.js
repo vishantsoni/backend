@@ -38,16 +38,19 @@ app.use("/api/transactions", require("./routes/transactionRoutes"));
 app.use("/api/settings", require("./routes/settingsRoutes"));
 app.use("/api/orders", require("./routes/orderRoutes"));
 app.use("/api/ecom", require("./routes/ecomRoutes"));
+app.use("/api/plan", require("./routes/planPurchaseRoute"));
 app.post("/api/upload", async (req, res) => {
   try {
     // 1. चेक करें कि फाइल्स आई हैं या नहीं
     if (!req.files || req.files.length === 0) {
-      return res.status(400).json({ success: false, message: "No files uploaded" });
+      return res
+        .status(400)
+        .json({ success: false, message: "No files uploaded" });
     }
 
     const file = req.files[0];
     const uploadDir = "uploads/config";
-    
+
     // 2. सुनिश्चित करें कि फोल्डर मौजूद है (वरना writeFile एरर देगा)
     await fs.mkdir(uploadDir, { recursive: true });
 
@@ -59,11 +62,10 @@ app.post("/api/upload", async (req, res) => {
     await fs.writeFile(filePath, file.buffer);
 
     // 5. रिस्पॉन्स भेजें (URL में फॉरवर्ड स्लैश का सही इस्तेमाल)
-    res.json({ 
-      success: true, 
-      url: `${process.env.APP_URL}/${uploadDir}/${fileName}` 
+    res.json({
+      success: true,
+      url: `${process.env.APP_URL}/${uploadDir}/${fileName}`,
     });
-
   } catch (error) {
     console.error("File upload error:", error);
     res.status(500).json({ success: false, message: "File upload failed" });

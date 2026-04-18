@@ -3,12 +3,13 @@ const db = require("../config/db");
 exports.getKycRequests = async (req, res) => {
   try {
     console.log("fetching start");
-    
+
     const page = parseInt(req.query.page) || 1;
     const limit = parseInt(req.query.limit) || 10;
     const offset = (page - 1) * limit;
 
-    const requests = await db.query(`
+    const requests = await db.query(
+      `
       SELECT 
         kr.id, kr.user_id, kr.status, kr.created_at,
         u.full_name, u.username, u.email, u.phone, u.kyc_status,
@@ -21,7 +22,9 @@ exports.getKycRequests = async (req, res) => {
       GROUP BY kr.id, u.id
       ORDER BY kr.created_at DESC
       LIMIT $1 OFFSET $2
-    `, [limit, offset]);
+    `,
+      [limit, offset],
+    );
 
     const total = await db.query(`
       SELECT COUNT(*) 
@@ -30,17 +33,20 @@ exports.getKycRequests = async (req, res) => {
     `);
 
     // Get documents for each request
-    const requestIds = requests.rows.map(r => r.id);
-    const docs = await db.query(`
+    const requestIds = requests.rows.map((r) => r.id);
+    const docs = await db.query(
+      `
       SELECT kr.user_id, kd.document_type, kd.file_url, kd.status, kd.id as doc_id
       FROM kyc_requests kr
       JOIN kyc_documents kd ON kr.user_id = kd.user_id
       WHERE kr.id = ANY($1::int[])
-    `, [requestIds]);
+    `,
+      [requestIds],
+    );
 
-    const requestsWithDocs = requests.rows.map(req => ({
+    const requestsWithDocs = requests.rows.map((req) => ({
       ...req,
-      documents: docs.rows.filter(d => d.user_id === req.user_id)
+      documents: docs.rows.filter((d) => d.user_id === req.user_id),
     }));
 
     res.json({
@@ -50,12 +56,12 @@ exports.getKycRequests = async (req, res) => {
         page,
         limit,
         total: parseInt(total.rows[0].count),
-        pages: Math.ceil(parseInt(total.rows[0].count) / limit)
-      }
+        pages: Math.ceil(parseInt(total.rows[0].count) / limit),
+      },
     });
   } catch (err) {
     console.error(err);
-    res.status(500).json({ status: false, error: 'Server error' });
+    res.status(500).json({ status: false, error: "Server error" });
   }
 };
 
@@ -64,54 +70,60 @@ exports.updateKycRequest = async (req, res) => {
     const { id } = req.params;
     const { status, remark } = req.body; // status: 'approved' | 'rejected'
 
-    if (!['approved', 'rejected'].includes(status)) {
-      return res.status(400).json({ status: false, error: 'Status must be approved or rejected' });
+    if (!["approved", "rejected"].includes(status)) {
+      return res
+        .status(400)
+        .json({ status: false, error: "Status must be approved or rejected" });
     }
 
     // Get request to check user_id
-    const request = await db.query('SELECT user_id FROM kyc_requests WHERE id = $1', [id]);
+    const request = await db.query(
+      "SELECT user_id FROM kyc_requests WHERE id = $1",
+      [id],
+    );
     if (request.rows.length === 0) {
-      return res.status(404).json({ status: false, error: 'KYC request not found' });
+      return res
+        .status(404)
+        .json({ status: false, error: "KYC request not found" });
     }
     const userId = request.rows[0].user_id;
 
-    const tx = await db.query('BEGIN');
+    const tx = await db.query("BEGIN");
     try {
       // Update request
       await db.query(
-        'UPDATE kyc_requests SET status = $1, rejection_remark = $2 WHERE id = $3',
-        [status, remark || null, id]
+        "UPDATE kyc_requests SET status = $1, rejection_remark = $2 WHERE id = $3",
+        [status, remark || null, id],
       );
-
-      // Update documents
-      // await db.query(
-      //   'UPDATE kyc_documents SET status = $1 WHERE user_id = $2',
-      //   [status, userId]
-      // );
 
       // Update user kyc_status
-      const userStatus = status === 'approved';
-      await db.query(
-        'UPDATE users SET kyc_status = $1 WHERE id = $2',
-        [userStatus, userId]
-      );
+      const userStatus = status === "approved";
 
-      await db.query('COMMIT');
-      
+      // let is_active = false;
+
+      // if (status === "approved") {
+      //   is_active = true;
+      // }
+
+      await db.query("UPDATE users SET kyc_status = $1 WHERE id = $2", [
+        userStatus,
+        userId,
+      ]);
+
+      await db.query("COMMIT");
+
       res.json({
         status: true,
         message: `KYC request ${status} successfully`,
         request_id: id,
-        user_id: userId
+        user_id: userId,
       });
     } catch (txErr) {
-      await db.query('ROLLBACK');
+      await db.query("ROLLBACK");
       throw txErr;
     }
   } catch (err) {
     console.error(err);
-    res.status(500).json({ status: false, error: 'Server error' });
+    res.status(500).json({ status: false, error: "Server error" });
   }
 };
-
-

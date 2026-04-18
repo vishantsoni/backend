@@ -3,28 +3,28 @@ const db = require("../config/db");
 exports.getSettings = async (req, res) => {
   try {
     const { category } = req.query;
-    let query = 'SELECT * FROM app_settings';
+    let query = "SELECT * FROM app_settings";
     const params = [];
-    
+
     if (category) {
-      query += ' WHERE category = $1';
+      query += " WHERE category = $1";
       params.push(category);
     }
-    
-    query += ' ORDER BY category, setting_key';
-    
+
+    query += " ORDER BY category, setting_key";
+
     const result = await db.query(query, params);
-    
+
     res.status(200).json({
       success: true,
-      message: 'Settings fetched successfully',
-      data: result.rows
+      message: "Settings fetched successfully",
+      data: result.rows,
     });
   } catch (error) {
-    console.error('Error fetching settings:', error);
+    console.error("Error fetching settings:", error);
     res.status(500).json({
       success: false,
-      message: 'Internal server error'
+      message: "Internal server error",
     });
   }
 };
@@ -32,36 +32,36 @@ exports.getSettings = async (req, res) => {
 exports.getSettingByKey = async (req, res) => {
   try {
     const { key } = req.params;
-    
-    if (!key || typeof key !== 'string' || key.trim().length === 0) {
+
+    if (!key || typeof key !== "string" || key.trim().length === 0) {
       return res.status(400).json({
         success: false,
-        message: 'Valid setting_key is required'
+        message: "Valid setting_key is required",
       });
     }
-    
+
     const result = await db.query(
-      'SELECT * FROM app_settings WHERE setting_key = $1',
-      [key.trim()]
+      "SELECT * FROM app_settings WHERE setting_key = $1",
+      [key.trim()],
     );
-    
+
     if (result.rows.length === 0) {
       return res.status(404).json({
         success: false,
-        message: 'Setting not found for the provided key'
+        message: "Setting not found for the provided key",
       });
     }
-    
+
     res.status(200).json({
       success: true,
-      message: 'Setting fetched successfully',
-      data: result.rows[0]
+      message: "Setting fetched successfully",
+      data: result.rows[0],
     });
   } catch (error) {
-    console.error('Error fetching setting:', error);
+    console.error("Error fetching setting:", error);
     res.status(500).json({
       success: false,
-      message: 'Internal server error'
+      message: "Internal server error",
     });
   }
 };
@@ -69,42 +69,47 @@ exports.getSettingByKey = async (req, res) => {
 exports.createSetting = async (req, res) => {
   try {
     const { setting_key, setting_value, category } = req.body;
-    
-    if (!setting_key || typeof setting_key !== 'string' || setting_key.trim().length === 0) {
+
+    if (
+      !setting_key ||
+      typeof setting_key !== "string" ||
+      setting_key.trim().length === 0
+    ) {
       return res.status(400).json({
         success: false,
-        message: 'setting_key is required and must be non-empty string'
+        message: "setting_key is required and must be non-empty string",
       });
     }
-    
+
     if (!setting_value) {
       return res.status(400).json({
         success: false,
-        message: 'setting_value is required'
+        message: "setting_value is required",
       });
     }
-    
+
     const result = await db.query(
-      'INSERT INTO app_settings (setting_key, setting_value, category) VALUES ($1, $2, $3) RETURNING *',
-      [setting_key.trim(), setting_value, category || null]
+      "INSERT INTO app_settings (setting_key, setting_value, category) VALUES ($1, $2, $3) RETURNING *",
+      [setting_key.trim(), setting_value, category || null],
     );
-    
+
     res.status(201).json({
       success: true,
-      message: 'Setting created successfully',
-      data: result.rows[0]
+      message: "Setting created successfully",
+      data: result.rows[0],
     });
   } catch (error) {
-    if (error.code === '23505') { // Unique violation
+    if (error.code === "23505") {
+      // Unique violation
       return res.status(409).json({
         success: false,
-        message: 'Setting key already exists'
+        message: "Setting key already exists",
       });
     }
-    console.error('Error creating setting:', error);
+    console.error("Error creating setting:", error);
     res.status(500).json({
       success: false,
-      message: 'Internal server error'
+      message: "Internal server error",
     });
   }
 };
@@ -113,61 +118,63 @@ exports.updateSetting = async (req, res) => {
   try {
     const { key } = req.params;
     const { setting_value, category } = req.body;
-    
-    if (!key || typeof key !== 'string' || key.trim().length === 0) {
+
+    if (!key || typeof key !== "string" || key.trim().length === 0) {
       return res.status(400).json({
         success: false,
-        message: 'Valid setting_key is required'
+        message: "Valid setting_key is required",
       });
     }
-    
+
     const updates = [];
     const values = [];
     let paramIndex = 1;
-    
+
     if (setting_value !== undefined) {
       updates.push(`setting_value = $${paramIndex}`);
       values.push(setting_value);
       paramIndex++;
     }
-    
+
     if (category !== undefined) {
       updates.push(`category = $${paramIndex}`);
       values.push(category);
       paramIndex++;
     }
-    
+
     if (updates.length === 0) {
       return res.status(400).json({
         success: false,
-        message: 'No fields to update'
+        message: "No fields to update",
       });
     }
-    
+
     values.push(key.trim());
-    
+
     const result = await db.query(
-      `UPDATE app_settings SET ${updates.join(', ')}, updated_at = CURRENT_TIMESTAMP WHERE setting_key = $${paramIndex} RETURNING *`,
-      values
+      `UPDATE app_settings SET ${updates.join(
+        ", ",
+      )}, updated_at = CURRENT_TIMESTAMP WHERE setting_key = $${paramIndex} RETURNING *`,
+      values,
     );
-    
+
     if (result.rowCount === 0) {
       return res.status(404).json({
         success: false,
-        message: 'Setting not found'
+        message: "Setting not found",
       });
     }
-    
+
     res.status(200).json({
       success: true,
-      message: 'Setting updated successfully',
-      data: result.rows[0]
+      message: "Setting updated successfully",
+      data: result.rows[0],
     });
   } catch (error) {
-    console.error('Error updating setting:', error);
+    console.error("Error updating setting:", error);
     res.status(500).json({
       success: false,
-      message: 'Internal server error'
+      message: "Internal server error",
     });
   }
 };
@@ -175,36 +182,36 @@ exports.updateSetting = async (req, res) => {
 exports.deleteSetting = async (req, res) => {
   try {
     const { key } = req.params;
-    
-    if (!key || typeof key !== 'string' || key.trim().length === 0) {
+
+    if (!key || typeof key !== "string" || key.trim().length === 0) {
       return res.status(400).json({
         success: false,
-        message: 'Valid setting_key is required'
+        message: "Valid setting_key is required",
       });
     }
-    
+
     const result = await db.query(
-      'DELETE FROM app_settings WHERE setting_key = $1 RETURNING *',
-      [key.trim()]
+      "DELETE FROM app_settings WHERE setting_key = $1 RETURNING *",
+      [key.trim()],
     );
-    
+
     if (result.rowCount === 0) {
       return res.status(404).json({
         success: false,
-        message: 'Setting not found'
+        message: "Setting not found",
       });
     }
-    
+
     res.status(200).json({
       success: true,
-      message: 'Setting deleted successfully',
-      data: result.rows[0]
+      message: "Setting deleted successfully",
+      data: result.rows[0],
     });
   } catch (error) {
-    console.error('Error deleting setting:', error);
+    console.error("Error deleting setting:", error);
     res.status(500).json({
       success: false,
-      message: 'Internal server error'
+      message: "Internal server error",
     });
   }
 };
@@ -213,28 +220,28 @@ exports.deleteSetting = async (req, res) => {
 exports.getLevelCommissions = async (req, res) => {
   try {
     const { level_no } = req.query;
-    let query = 'SELECT * FROM level_commissions';
+    let query = "SELECT * FROM level_commissions";
     const params = [];
-    
+
     if (level_no) {
-      query += ' WHERE level_no = $1';
+      query += " WHERE level_no = $1";
       params.push(parseInt(level_no));
     }
-    
-    query += ' ORDER BY level_no';
-    
+
+    query += " ORDER BY level_no";
+
     const result = await db.query(query, params);
-    
+
     res.status(200).json({
       success: true,
-      message: 'Level commissions fetched successfully',
-      data: result.rows
+      message: "Level commissions fetched successfully",
+      data: result.rows,
     });
   } catch (error) {
-    console.error('Error fetching level commissions:', error);
+    console.error("Error fetching level commissions:", error);
     res.status(500).json({
       success: false,
-      message: 'Internal server error'
+      message: "Internal server error",
     });
   }
 };
@@ -242,99 +249,127 @@ exports.getLevelCommissions = async (req, res) => {
 exports.getLevelCommission = async (req, res) => {
   try {
     const { level_no } = req.params;
-    
+
     const parsedLevelNo = parseInt(level_no);
     if (isNaN(parsedLevelNo) || parsedLevelNo < 1) {
       return res.status(400).json({
         success: false,
-        message: 'Valid level_no (positive integer) is required'
+        message: "Valid level_no (positive integer) is required",
       });
     }
-    
+
     const result = await db.query(
-      'SELECT * FROM level_commissions WHERE level_no = $1',
-      [parsedLevelNo]
+      "SELECT * FROM level_commissions WHERE level_no = $1",
+      [parsedLevelNo],
     );
-    
+
     if (result.rows.length === 0) {
       return res.status(404).json({
         success: false,
-        message: 'Level commission not found'
+        message: "Level commission not found",
       });
     }
-    
+
     res.status(200).json({
       success: true,
-      message: 'Level commission fetched successfully',
-      data: result.rows[0]
+      message: "Level commission fetched successfully",
+      data: result.rows[0],
     });
   } catch (error) {
-    console.error('Error fetching level commission:', error);
+    console.error("Error fetching level commission:", error);
     res.status(500).json({
       success: false,
-      message: 'Internal server error'
+      message: "Internal server error",
     });
   }
 };
 
 exports.createLevelCommission = async (req, res) => {
   try {
-    const { level_no, commission_percentage, level_name, team_size, ir_direct, bima, ir_commission } = req.body;
-    
+    const {
+      level_no,
+      commission_percentage,
+      level_name,
+      team_size,
+      ir_direct,
+      bima,
+      ir_commission,
+    } = req.body;
+
     const parsedLevelNo = parseInt(level_no);
     if (isNaN(parsedLevelNo) || parsedLevelNo < 1) {
       return res.status(400).json({
         success: false,
-        message: 'level_no must be positive integer'
+        message: "level_no must be positive integer",
       });
     }
-    
-    if (!commission_percentage || isNaN(commission_percentage) || commission_percentage < 0 || commission_percentage > 100) {
+
+    if (
+      !commission_percentage ||
+      isNaN(commission_percentage) ||
+      commission_percentage < 0 ||
+      commission_percentage > 100
+    ) {
       return res.status(400).json({
         success: false,
-        message: 'commission_percentage must be between 0 and 100'
+        message: "commission_percentage must be between 0 and 100",
       });
     }
-    
+
     const result = await db.query(
-      'INSERT INTO level_commissions (level_no, commission_percentage, level_name, team_size, ir_direct, bima, ir_commission) VALUES ($1, $2, $3,$4,$5,$6,$7) RETURNING *',
-      [parsedLevelNo, parseFloat(commission_percentage), level_name, team_size, parseFloat(ir_direct), bima, parseFloat(ir_commission)]
+      "INSERT INTO level_commissions (level_no, commission_percentage, level_name, team_size, ir_direct, bima, ir_commission) VALUES ($1, $2, $3,$4,$5,$6,$7) RETURNING *",
+      [
+        parsedLevelNo,
+        parseFloat(commission_percentage),
+        level_name,
+        team_size,
+        parseFloat(ir_direct),
+        bima,
+        parseFloat(ir_commission),
+      ],
     );
-    
+
     res.status(201).json({
       success: true,
-      message: 'Level commission created successfully',
-      data: result.rows[0]
+      message: "Level commission created successfully",
+      data: result.rows[0],
     });
   } catch (error) {
-    if (error.code === '23505') {
+    if (error.code === "23505") {
       return res.status(409).json({
         success: false,
-        message: 'Level commission for this level_no already exists'
+        message: "Level commission for this level_no already exists",
       });
     }
-    console.error('Error creating level commission:', error);
+    console.error("Error creating level commission:", error);
     res.status(500).json({
       success: false,
-      message: 'Internal server error'
+      message: "Internal server error",
     });
   }
 };
 
 exports.updateLevelCommission = async (req, res) => {
   try {
-    const { level_no } = req.params;
-    const { commission_percentage, level_name, team_size, ir_direct, bima, ir_commission } = req.body;
-    
-    const parsedLevelNo = parseInt(level_no);
+    const { level_id } = req.params;
+    const {
+      commission_percentage,
+      level_name,
+      team_size,
+      ir_direct,
+      bima,
+      ir_commission,
+      level_no: n_level_no,
+    } = req.body;
+
+    const parsedLevelNo = parseInt(level_id);
     if (isNaN(parsedLevelNo) || parsedLevelNo < 1) {
       return res.status(400).json({
         success: false,
-        message: 'Valid level_no (positive integer) is required'
+        message: "Valid level_id (positive integer) is required",
       });
     }
-       
-    
+
     const result = await db.query(
       `UPDATE level_commissions SET 
       commission_percentage = $1,
@@ -342,36 +377,38 @@ exports.updateLevelCommission = async (req, res) => {
       team_size = $3,
       ir_direct = $4,
       bima = $5,
-      ir_commission = $6 
-      WHERE level_no = $7 RETURNING *`,
+      ir_commission = $6 ,
+      level_no = $8
+      WHERE id = $7 RETURNING *`,
       [
-        parseFloat(commission_percentage), 
+        parseFloat(commission_percentage),
         level_name,
         team_size,
         ir_direct,
         bima,
         ir_commission,
-        parsedLevelNo
-      ]
+        parsedLevelNo,
+        n_level_no,
+      ],
     );
-    
+
     if (result.rowCount === 0) {
       return res.status(404).json({
         success: false,
-        message: 'Level commission not found'
+        message: "Level commission not found",
       });
     }
-    
+
     res.status(200).json({
       success: true,
-      message: 'Level commission updated successfully',
-      data: result.rows[0]
+      message: "Level commission updated successfully",
+      data: result.rows[0],
     });
   } catch (error) {
-    console.error('Error updating level commission:', error);
+    console.error("Error updating level commission:", error);
     res.status(500).json({
       success: false,
-      message: 'Internal server error'
+      message: "Internal server error",
     });
   }
 };
@@ -379,106 +416,104 @@ exports.updateLevelCommission = async (req, res) => {
 exports.deleteLevelCommission = async (req, res) => {
   try {
     const { level_no } = req.params;
-    
+
     const parsedLevelNo = parseInt(level_no);
     if (isNaN(parsedLevelNo) || parsedLevelNo < 1) {
       return res.status(400).json({
         success: false,
-        message: 'Valid level_no (positive integer) is required'
+        message: "Valid level_no (positive integer) is required",
       });
     }
-    
+
     const result = await db.query(
-      'DELETE FROM level_commissions WHERE level_no = $1 RETURNING *',
-      [parsedLevelNo]
+      "DELETE FROM level_commissions WHERE level_no = $1 RETURNING *",
+      [parsedLevelNo],
     );
-    
+
     if (result.rowCount === 0) {
       return res.status(404).json({
         success: false,
-        message: 'Level commission not found'
+        message: "Level commission not found",
       });
     }
-    
+
     res.status(200).json({
       success: true,
-      message: 'Level commission deleted successfully',
-      data: result.rows[0]
+      message: "Level commission deleted successfully",
+      data: result.rows[0],
     });
   } catch (error) {
-    console.error('Error deleting level commission:', error);
+    console.error("Error deleting level commission:", error);
     res.status(500).json({
       success: false,
-      message: 'Internal server error'
+      message: "Internal server error",
     });
   }
 };
-
 
 // capping
 exports.getLevelCapping = async (req, res) => {
   try {
     const { level_no } = req.query;
-    let query = 'SELECT cap.*, lc.level_name, lc.level_no FROM level_cappings cap LEFT JOIN level_commissions lc ON lc.id =  cap.level_id ';
+    let query =
+      "SELECT cap.*, lc.level_name, lc.level_no FROM level_cappings cap LEFT JOIN level_commissions lc ON lc.id =  cap.level_id ";
     const params = [];
-    
+
     if (level_no) {
-      query += ' WHERE level_no = $1';
+      query += " WHERE level_no = $1";
       params.push(parseInt(level_no));
     }
-    
-    query += ' ORDER BY level_id';
-    
+
+    query += " ORDER BY level_id";
+
     const result = await db.query(query, params);
-    
+
     res.status(200).json({
       success: true,
-      message: 'Level capping fetched successfully',
-      data: result.rows
+      message: "Level capping fetched successfully",
+      data: result.rows,
     });
   } catch (error) {
-    console.error('Error fetching level capping:', error);
+    console.error("Error fetching level capping:", error);
     res.status(500).json({
       success: false,
-      message: 'Internal server error'
+      message: "Internal server error",
     });
   }
 };
 
-
 exports.createLevelCapping = async (req, res) => {
   try {
     const { level_id, day_limit, week_limit, monthly_limit } = req.body;
-    
-    
+
     // if (!week_limit || isNaN(week_limit) || parseFloat(week_limit) > 100) {
     //   return res.status(400).json({
     //     success: false,
     //     message: 'week_limit must be greater than 0'
     //   });
     // }
-    
+
     const result = await db.query(
-      'INSERT INTO level_cappings (level_id, day_limit, week_limit, monthly_limit) VALUES ($1, $2, $3, $4) RETURNING *',
-      [level_id, day_limit, week_limit, monthly_limit]
+      "INSERT INTO level_cappings (level_id, day_limit, week_limit, monthly_limit) VALUES ($1, $2, $3, $4) RETURNING *",
+      [level_id, day_limit, week_limit, monthly_limit],
     );
-    
+
     res.status(201).json({
       success: true,
-      message: 'Level capping created successfully',
-      data: result.rows[0]
+      message: "Level capping created successfully",
+      data: result.rows[0],
     });
   } catch (error) {
-    if (error.code === '23505') {
+    if (error.code === "23505") {
       return res.status(409).json({
         success: false,
-        message: 'Level capping for this level_no already exists'
+        message: "Level capping for this level_no already exists",
       });
     }
-    console.error('Error creating level capping:', error);
+    console.error("Error creating level capping:", error);
     res.status(500).json({
       success: false,
-      message: 'Internal server error'
+      message: "Internal server error",
     });
   }
 };
@@ -486,7 +521,7 @@ exports.createLevelCapping = async (req, res) => {
 exports.deleteLevelCapping = async (req, res) => {
   try {
     const { id } = req.params;
-    
+
     // const parsedLevelNo = parseInt(level_no);
     // if (isNaN(parsedLevelNo) || parsedLevelNo < 1) {
     //   return res.status(400).json({
@@ -494,29 +529,29 @@ exports.deleteLevelCapping = async (req, res) => {
     //     message: 'Valid level_no (positive integer) is required'
     //   });
     // }
-    
+
     const result = await db.query(
-      'DELETE FROM level_cappings WHERE id = $1 RETURNING *',
-      [id]
+      "DELETE FROM level_cappings WHERE id = $1 RETURNING *",
+      [id],
     );
-    
+
     if (result.rowCount === 0) {
       return res.status(404).json({
         success: false,
-        message: 'Level capping not found'
+        message: "Level capping not found",
       });
     }
-    
+
     res.status(200).json({
       success: true,
-      message: 'Level capping deleted successfully',
-      data: result.rows[0]
+      message: "Level capping deleted successfully",
+      data: result.rows[0],
     });
   } catch (error) {
-    console.error('Error deleting level capping:', error);
+    console.error("Error deleting level capping:", error);
     res.status(500).json({
       success: false,
-      message: 'Internal server error'
+      message: "Internal server error",
     });
   }
 };
@@ -525,47 +560,41 @@ exports.updateLevelCapping = async (req, res) => {
   try {
     const { level_no } = req.params;
     const { level_id, day_limit, week_limit, monthly_limit } = req.body;
-    
+
     const parsedLevelNo = parseInt(level_no);
     if (isNaN(parsedLevelNo) || parsedLevelNo < 1) {
       return res.status(400).json({
         success: false,
-        message: 'Valid level_no (positive integer) is required'
+        message: "Valid level_no (positive integer) is required",
       });
     }
-       
-    
+
     const result = await db.query(
       `UPDATE level_cappings SET 
       day_limit = $1,
       week_limit = $2,
       monthly_limit = $3      
       WHERE id = $4 RETURNING *`,
-      [
-        day_limit,
-        week_limit,
-        monthly_limit,
-        parsedLevelNo
-      ]
+      [day_limit, week_limit, monthly_limit, parsedLevelNo],
     );
-    
+
     if (result.rowCount === 0) {
       return res.status(404).json({
         success: false,
-        message: 'Level commission not found'
+        message: "Level commission not found",
       });
     }
-    
+
     res.status(200).json({
       success: true,
-      message: 'Level commission updated successfully',
-      data: result.rows[0]
+      message: "Level commission updated successfully",
+      data: result.rows[0],
     });
   } catch (error) {
-    console.error('Error updating level commission:', error);
+    console.error("Error updating level commission:", error);
     res.status(500).json({
       success: false,
-      message: 'Internal server error'
+      message: "Internal server error",
     });
   }
 };

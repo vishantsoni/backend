@@ -58,7 +58,7 @@ exports.getMyTree = async (req, res) => {
     // By using <@ (is descendant) and including the user's own path,
     // we get the full subtree in one go.
     const result = await db.query(
-      `SELECT id, username, email, phone, full_name, node_path, referrer_id, referral_code, created_at 
+      `SELECT id, username, email, phone, full_name, node_path, referrer_id, referral_code, created_at, is_active, kyc_status 
        FROM users 
        WHERE node_path <@ (SELECT node_path FROM users WHERE id = $1)::ltree`,
       [userId],
@@ -165,7 +165,9 @@ exports.updateKycStatus = async (req, res) => {
 
     // Optional: Log admin action or notify user
     console.log(
-      `KYC ${status ? "approved" : "rejected"} for user ${userId}${remark ? ` - ${remark}` : ""}`,
+      `KYC ${status ? "approved" : "rejected"} for user ${userId}${
+        remark ? ` - ${remark}` : ""
+      }`,
     );
 
     res.json({
@@ -179,145 +181,381 @@ exports.updateKycStatus = async (req, res) => {
   }
 };
 
-exports.createUser = async (req, res) => {
-  const {
-    fullName: full_name,
-    aadhaarNo: aadhaar_no,
-    dob,
-    gender,
-    panNo: pan_no,
-    email,
-    whatsappNo: whatsapp_no,
-    phone,
-    address,
-    city,
-    state,
-    pin,
-    bankName: bank_name,
-    accountHolderName: account_holder_name,
-    accountNo: account_no,
-    ifscCode: ifsc_code,
-    branch,
+// exports.createUser = async (req, res) => {
+//   const {
+//     fullName: full_name,
+//     aadhaarNo: aadhaar_no,
+//     dob,
+//     gender,
+//     panNo: pan_no,
+//     email,
+//     whatsappNo: whatsapp_no,
+//     phone,
+//     address,
+//     city,
+//     state,
+//     pin,
+//     bankName: bank_name,
+//     accountHolderName: account_holder_name,
+//     accountNo: account_no,
+//     ifscCode: ifsc_code,
+//     branch,
 
-    referrerName: referrer_name,
-    referrerContact: referrer_contact,
-    referral_code,
-    nomineeName: nominee_name,
-    nomineeRelationship: nominee_relationship,
-    nomineeAge: nominee_age,
-    nomineeContact: nominee_contact,
-    nomineeAadhaar: nominee_aadhaar,
-    businessLevel: business_level,
-    agreedToTerms: agreed_to_terms,
-    password,
-    referrer_id,
-  } = req.body;
+//     referrerName: referrer_name,
+//     referrerContact: referrer_contact,
+//     referral_code,
+//     nomineeName: nominee_name,
+//     nomineeRelationship: nominee_relationship,
+//     nomineeAge: nominee_age,
+//     nomineeContact: nominee_contact,
+//     nomineeAadhaar: nominee_aadhaar,
+//     businessLevel: business_level,
+//     agreedToTerms: agreed_to_terms,
+//     password,
+//     referrer_id,
+//   } = req.body;
+
+//   try {
+//     if (!password) {
+//       return res.status(400).json({
+//         status: false,
+//         message: "Password is required for user creation.",
+//       });
+//     }
+
+//     // Auto-generate unique 10-digit username
+//     const generateUsername = async () => {
+//       let username;
+//       let attempts = 0;
+//       while (attempts < 3) {
+//         username = crypto.randomInt(1000000000, 9999999999).toString();
+//         const exists = await db.query(
+//           "SELECT 1 FROM users WHERE username = $1",
+//           [username],
+//         );
+//         if (exists.rows.length === 0) return username;
+//         attempts++;
+//       }
+//       throw new Error("Failed to generate unique username");
+//     };
+
+//     const username = await generateUsername();
+
+//     // Hash password
+//     const salt = await bcrypt.genSalt(10);
+//     const hashedPassword = await bcrypt.hash(password, salt);
+
+//     let nodePath = "";
+//     if (referrer_id) {
+//       const referrer = await db.query(
+//         "SELECT node_path FROM users WHERE id = $1",
+//         [referrer_id],
+//       );
+//       if (referrer.rows.length > 0) {
+//         nodePath = `${referrer.rows[0].node_path}.${username}`;
+//       }
+//     } else {
+//       nodePath = username;
+//     }
+
+//     // Generate or validate referral_code (FSYYMMSN format)
+//     let finalReferralCode = referral_code;
+
+//     if (finalReferralCode) {
+//       // Validate provided code exists
+//       const exists = await db.query(
+//         "SELECT 1 FROM users WHERE referral_code = $1",
+//         [finalReferralCode],
+//       );
+//       if (exists.rows.length > 0) {
+//         return res
+//           .status(400)
+//           .json({ status: false, message: "Referral code already exists" });
+//       }
+//     } else {
+//       // Auto-generate FS + YY + MM + SN (sequential per year-month)
+//       const now = new Date();
+//       const year = (now.getFullYear() % 100).toString().padStart(2, "0");
+//       const month = (now.getMonth() + 1).toString().padStart(2, "0");
+//       const prefix = `FS${year}${month}`;
+
+//       let sn = 1;
+//       let attempts = 0;
+//       const maxAttempts = 100;
+//       while (attempts < maxAttempts) {
+//         const snStr = sn.toString().padStart(4, "0"); // Allow up to 9999 per month
+//         const candidateCode = `${prefix}${snStr}`;
+//         if (candidateCode.length > 20) {
+//           throw new Error("Referral code too long");
+//         }
+
+//         const exists = await db.query(
+//           "SELECT 1 FROM users WHERE referral_code = $1",
+//           [candidateCode],
+//         );
+//         if (exists.rows.length === 0) {
+//           finalReferralCode = candidateCode;
+//           break;
+//         }
+//         sn++;
+//         attempts++;
+//       }
+//       if (!finalReferralCode) {
+//         return res.status(400).json({
+//           status: false,
+//           message: "Unable to generate unique referral code. Try later.",
+//         });
+//       }
+//     }
+
+//     // INSERT all fields + phone (email, phone, whatsapp_no...)
+//     const newUser = await db.query(
+//       `
+//             INSERT INTO users (
+//                 full_name, aadhaar_no, dob, gender, pan_no, email, phone, whatsapp_no, address, city, state, pin,
+//                 bank_name, account_holder_name, account_no, ifsc_code, branch,
+//                 referral_code, referrer_name, referrer_contact,
+//                 nominee_name, nominee_relationship, nominee_age, nominee_contact, nominee_aadhaar,
+//                 business_level, agreed_to_terms, kyc_status, username, password_hash, referrer_id, node_path
+//             ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, $29, $30, $31, $32)
+//             RETURNING *
+//         `,
+//       [
+//         full_name || null,
+//         aadhaar_no || null,
+//         dob,
+//         gender || null,
+//         pan_no || null,
+//         email || null,
+//         phone || null,
+//         whatsapp_no || null,
+//         address || null,
+//         city || null,
+//         state || null,
+//         pin || null,
+//         bank_name || null,
+//         account_holder_name || null,
+//         account_no || null,
+//         ifsc_code || null,
+//         branch || null,
+//         finalReferralCode,
+//         referrer_name || null,
+//         referrer_contact || null,
+//         nominee_name || null,
+//         nominee_relationship || null,
+//         nominee_age,
+//         nominee_contact || null,
+//         nominee_aadhaar || null,
+//         Number(business_level) || 1,
+//         !!agreed_to_terms,
+//         false, // kyc_status default
+//         username,
+//         hashedPassword,
+//         referrer_id || null,
+//         nodePath,
+//       ],
+//     );
+
+//     res.status(201).json({
+//       status: true,
+//       message: "User created successfully with full profile",
+//       user: newUser.rows[0],
+//     });
+//   } catch (err) {
+//     console.error(err.message);
+//     res
+//       .status(500)
+//       .json({ status: false, message: "Server Error", error: err.message });
+//   }
+// };
+
+const generateUsername = async (client) => {
+  let username;
+  let attempts = 0;
+
+  while (attempts < 5) {
+    username = crypto.randomInt(1000000000, 9999999999).toString();
+
+    const exists = await client.query(
+      "SELECT 1 FROM users WHERE username = $1",
+      [username],
+    );
+
+    if (exists.rows.length === 0) return username;
+    attempts++;
+  }
+
+  throw new Error("Failed to generate username");
+};
+
+exports.createUser = async (req, res) => {
+  const client = await db.connect();
 
   try {
+    await client.query("BEGIN");
+
+    const {
+      fullName: full_name,
+      aadhaarNo: aadhaar_no,
+      dob,
+      gender,
+      panNo: pan_no,
+      email,
+      whatsappNo: whatsapp_no,
+      phone,
+      address,
+      city,
+      state,
+      pin,
+      bankName: bank_name,
+      accountHolderName: account_holder_name,
+      accountNo: account_no,
+      ifscCode: ifsc_code,
+      branch,
+
+      referrerName: referrer_name,
+      referrerContact: referrer_contact,
+      referral_code,
+      nomineeName: nominee_name,
+      nomineeRelationship: nominee_relationship,
+      nomineeAge: nominee_age,
+      nomineeContact: nominee_contact,
+      nomineeAadhaar: nominee_aadhaar,
+      businessLevel: business_level,
+      agreedToTerms: agreed_to_terms,
+      password,
+      referrer_id,
+    } = req.body;
+
     if (!password) {
-      return res.status(400).json({
-        status: false,
-        message: "Password is required for user creation.",
-      });
+      throw new Error("Password is required");
     }
 
-    // Auto-generate unique 10-digit username
-    const generateUsername = async () => {
-      let username;
-      let attempts = 0;
-      while (attempts < 3) {
-        username = crypto.randomInt(1000000000, 9999999999).toString();
-        const exists = await db.query(
-          "SELECT 1 FROM users WHERE username = $1",
-          [username],
-        );
-        if (exists.rows.length === 0) return username;
-        attempts++;
-      }
-      throw new Error("Failed to generate unique username");
-    };
+    // 🔹 Generate Username
 
-    const username = await generateUsername();
+    const username = await generateUsername(client);
 
-    // Hash password
+    // 🔹 Password Hash
     const salt = await bcrypt.genSalt(10);
     const hashedPassword = await bcrypt.hash(password, salt);
 
-    let nodePath = "";
+    // 🔥 REFERRER + LOCK
+    let nodePath = username;
+    let binaryPath = "1";
+    let position = null;
+
+    let calculatedBusinessLevel = 1; // Default for root
+
     if (referrer_id) {
-      const referrer = await db.query(
-        "SELECT node_path FROM users WHERE id = $1",
+      const referrer = await client.query(
+        "SELECT node_path, binary_path FROM users WHERE id = $1 FOR UPDATE",
         [referrer_id],
       );
-      if (referrer.rows.length > 0) {
-        nodePath = `${referrer.rows[0].node_path}.${username}`;
+
+      if (referrer.rows.length === 0) {
+        throw new Error("Invalid referrer");
       }
+
+      const parent = referrer.rows[0];
+
+      nodePath = `${parent.node_path}.${username}`;
+
+      // 🔥 LOCK CHILDREN
+      const children = await client.query(
+        `SELECT position FROM users 
+         WHERE subpath(binary_path, 0, nlevel(binary_path)-1) = $1
+         FOR UPDATE`,
+        [parent.binary_path],
+      );
+
+      const taken = children.rows.map((r) => r.position);
+
+      // 🔥 AUTO LEFT → RIGHT → REJECT
+      if (!taken.includes(1)) {
+        position = 1;
+      } else if (!taken.includes(2)) {
+        position = 2;
+      } else {
+        throw new Error("Both legs are already filled");
+      }
+
+      binaryPath = `${parent.binary_path}.${position}`;
+      calculatedBusinessLevel = binaryPath.split(".").length;
     } else {
+      // Agar referrer_id nahi hai, toh check karein kya system mein pehle se koi Root hai?
+      const rootCheck = await client.query(
+        "SELECT 1 FROM users WHERE binary_path = '1'",
+      );
+      if (rootCheck.rows.length > 0) {
+        throw new Error(
+          "System already has a root user. A referrer ID is required for new registrations.",
+        );
+      }
+      // Agar koi nahi hai, tabhi ise path '1' milega
+      binaryPath = "1";
       nodePath = username;
     }
 
-    // Generate or validate referral_code (FSYYMMSN format)
+    // 🔹 Referral Code Logic (same as yours)
     let finalReferralCode = referral_code;
 
     if (finalReferralCode) {
-      // Validate provided code exists
-      const exists = await db.query(
+      const exists = await client.query(
         "SELECT 1 FROM users WHERE referral_code = $1",
         [finalReferralCode],
       );
       if (exists.rows.length > 0) {
-        return res
-          .status(400)
-          .json({ status: false, message: "Referral code already exists" });
+        throw new Error("Referral code already exists");
       }
     } else {
-      // Auto-generate FS + YY + MM + SN (sequential per year-month)
       const now = new Date();
       const year = (now.getFullYear() % 100).toString().padStart(2, "0");
       const month = (now.getMonth() + 1).toString().padStart(2, "0");
       const prefix = `FS${year}${month}`;
 
       let sn = 1;
-      let attempts = 0;
-      const maxAttempts = 100;
-      while (attempts < maxAttempts) {
-        const snStr = sn.toString().padStart(4, "0"); // Allow up to 9999 per month
-        const candidateCode = `${prefix}${snStr}`;
-        if (candidateCode.length > 20) {
-          throw new Error("Referral code too long");
-        }
 
-        const exists = await db.query(
+      while (true) {
+        const snStr = sn.toString().padStart(4, "0");
+        const candidate = `${prefix}${snStr}`;
+
+        const exists = await client.query(
           "SELECT 1 FROM users WHERE referral_code = $1",
-          [candidateCode],
+          [candidate],
         );
+
         if (exists.rows.length === 0) {
-          finalReferralCode = candidateCode;
+          finalReferralCode = candidate;
           break;
         }
+
         sn++;
-        attempts++;
-      }
-      if (!finalReferralCode) {
-        return res.status(400).json({
-          status: false,
-          message: "Unable to generate unique referral code. Try later.",
-        });
+        if (sn > 9999) {
+          throw new Error("Referral code limit reached");
+        }
       }
     }
 
-    // INSERT all fields + phone (email, phone, whatsapp_no...)
-    const newUser = await db.query(
-      `
-            INSERT INTO users (
-                full_name, aadhaar_no, dob, gender, pan_no, email, phone, whatsapp_no, address, city, state, pin,
-                bank_name, account_holder_name, account_no, ifsc_code, branch,
-                referral_code, referrer_name, referrer_contact,
-                nominee_name, nominee_relationship, nominee_age, nominee_contact, nominee_aadhaar,
-                business_level, agreed_to_terms, kyc_status, username, password_hash, referrer_id, node_path
-            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, $29, $30, $31, $32)
-            RETURNING *
-        `,
+    // 🔥 FINAL INSERT
+    const newUser = await client.query(
+      `INSERT INTO users (
+        full_name, aadhaar_no, dob, gender, pan_no, email, phone, whatsapp_no,
+        address, city, state, pin,
+        bank_name, account_holder_name, account_no, ifsc_code, branch,
+        referral_code, referrer_name, referrer_contact,
+        nominee_name, nominee_relationship, nominee_age, nominee_contact, nominee_aadhaar,
+        business_level, agreed_to_terms, kyc_status,
+        username, password_hash, referrer_id,
+        node_path, binary_path, position, is_active
+      ) VALUES (
+        $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,
+        $13,$14,$15,$16,$17,
+        $18,$19,$20,
+        $21,$22,$23,$24,$25,
+        $26,$27,$28,
+        $29,$30,$31,
+        $32,$33,$34, $35
+      ) RETURNING *`,
       [
         full_name || null,
         aadhaar_no || null,
@@ -344,26 +582,42 @@ exports.createUser = async (req, res) => {
         nominee_age,
         nominee_contact || null,
         nominee_aadhaar || null,
-        Number(business_level) || 1,
+        Number(calculatedBusinessLevel) || 1,
         !!agreed_to_terms,
-        false, // kyc_status default
+        false,
         username,
         hashedPassword,
         referrer_id || null,
         nodePath,
+        binaryPath,
+        position,
+        false,
       ],
     );
 
+    await client.query(
+      "INSERT INTO wallets (user_id, total_amount, left_count, right_count, paid_pairs) VALUES ($1, 0, 0, 0, 0)",
+      [newUser.rows[0].id],
+    );
+
+    await client.query("COMMIT");
+
     res.status(201).json({
       status: true,
-      message: "User created successfully with full profile",
+      message: "User created successfully",
       user: newUser.rows[0],
     });
   } catch (err) {
+    await client.query("ROLLBACK");
+
     console.error(err.message);
-    res
-      .status(500)
-      .json({ status: false, message: "Server Error", error: err.message });
+
+    res.status(400).json({
+      status: false,
+      message: err.message,
+    });
+  } finally {
+    client.release();
   }
 };
 
@@ -432,7 +686,7 @@ exports.uploadKycDocuments = async (req, res) => {
 exports.updateKycDocument = async (req, res) => {
   try {
     console.log("start");
-    
+
     const { docId } = req.params;
     const { status } = req.body;
 
@@ -531,26 +785,37 @@ exports.setTransactionPin = async (req, res) => {
     const { pin } = req.body;
 
     if (!pin || pin.length < 4 || pin.length > 6 || !/^[0-9]+$/.test(pin)) {
-      return res.status(400).json({ status: false, error: 'PIN must be 4-6 digits' });
+      return res
+        .status(400)
+        .json({ status: false, error: "PIN must be 4-6 digits" });
     }
 
     // Check KYC
-    const kycStatus = await db.query('SELECT kyc_status FROM users WHERE id = $1', [userId]);
+    const kycStatus = await db.query(
+      "SELECT kyc_status FROM users WHERE id = $1",
+      [userId],
+    );
     if (!kycStatus.rows[0]?.kyc_status) {
-      return res.status(400).json({ status: false, error: 'KYC approval required to set PIN' });
+      return res
+        .status(400)
+        .json({ status: false, error: "KYC approval required to set PIN" });
     }
 
     const hash = await bcrypt.hash(pin, 10);
 
-    await db.query(
-      'UPDATE users SET transaction_pin_hash = $1 WHERE id = $2',
-      [hash, userId]
-    );
+    await db.query("UPDATE users SET transaction_pin_hash = $1 WHERE id = $2", [
+      hash,
+      userId,
+    ]);
 
-    res.json({ status: true, hash, message: 'Transaction PIN set successfully' });
+    res.json({
+      status: true,
+      hash,
+      message: "Transaction PIN set successfully",
+    });
   } catch (err) {
     console.error(err);
-    res.status(500).json({ status: false, error: 'Server error' });
+    res.status(500).json({ status: false, error: "Server error" });
   }
 };
 
@@ -560,27 +825,43 @@ exports.changePassword = async (req, res) => {
     const userId = req.user.id;
     const { currentPassword, newPassword } = req.body;
 
-    const user = await db.query('SELECT password_hash, last_password_change FROM users WHERE id = $1', [userId]);
-    if (user.rows.length === 0) return res.status(404).json({ status: false, error: 'User not found' });
+    const user = await db.query(
+      "SELECT password_hash, last_password_change FROM users WHERE id = $1",
+      [userId],
+    );
+    if (user.rows.length === 0)
+      return res.status(404).json({ status: false, error: "User not found" });
 
-    const isMatch = await bcrypt.compare(currentPassword, user.rows[0].password_hash);
-    if (!isMatch) return res.status(400).json({ status: false, error: 'Invalid current password' });
+    const isMatch = await bcrypt.compare(
+      currentPassword,
+      user.rows[0].password_hash,
+    );
+    if (!isMatch)
+      return res
+        .status(400)
+        .json({ status: false, error: "Invalid current password" });
 
     // 60 day check
     const lastChange = user.rows[0].last_password_change;
-    if (lastChange && (Date.now() - new Date(lastChange).getTime()) < 60 * 24 * 60 * 60 * 1000) {
-      return res.status(400).json({ status: false, error: 'Password must be changed every 60 days minimum' });
+    if (
+      lastChange &&
+      Date.now() - new Date(lastChange).getTime() < 60 * 24 * 60 * 60 * 1000
+    ) {
+      return res.status(400).json({
+        status: false,
+        error: "Password must be changed every 60 days minimum",
+      });
     }
 
     const newHash = await bcrypt.hash(newPassword, 10);
     await db.query(
-      'UPDATE users SET password_hash = $1, last_password_change = CURRENT_TIMESTAMP WHERE id = $2',
-      [newHash, userId]
+      "UPDATE users SET password_hash = $1, last_password_change = CURRENT_TIMESTAMP WHERE id = $2",
+      [newHash, userId],
     );
 
-    res.json({ status: true, message: 'Password changed successfully' });
+    res.json({ status: true, message: "Password changed successfully" });
   } catch (err) {
     console.error(err);
-    res.status(500).json({ status: false, error: 'Server error' });
+    res.status(500).json({ status: false, error: "Server error" });
   }
 };

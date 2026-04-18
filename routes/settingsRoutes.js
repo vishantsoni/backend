@@ -14,7 +14,7 @@ const {
   getLevelCapping,
   createLevelCapping,
   deleteLevelCapping,
-  updateLevelCapping
+  updateLevelCapping,
 } = require("../controllers/settingsController");
 
 const authMiddleware = require("../middleware/authMiddleware");
@@ -34,16 +34,38 @@ router.delete("/:key", [authMiddleware, isSuperAdmin], deleteSetting);
 router.get("/commissions/list", getLevelCommissions);
 router.get("/level-commissions-by-no/:level_no", getLevelCommission);
 
-router.post("/level-commissions", [authMiddleware, isSuperAdmin], createLevelCommission);
-router.put("/level-commissions/:level_no", [authMiddleware, isSuperAdmin], updateLevelCommission);
-router.delete("/level-commissions/:level_no", [authMiddleware, isSuperAdmin], deleteLevelCommission);
+router.post(
+  "/level-commissions",
+  [authMiddleware, isSuperAdmin],
+  createLevelCommission,
+);
+router.put(
+  "/level-commissions/:level_id",
+  [authMiddleware, isSuperAdmin],
+  updateLevelCommission,
+);
+router.delete(
+  "/level-commissions/:level_no",
+  [authMiddleware, isSuperAdmin],
+  deleteLevelCommission,
+);
 
 // Level capping
 router.get("/capping/list", getLevelCapping);
-router.post("/level-capping", [authMiddleware, isSuperAdmin], createLevelCapping);
-router.put("/level-capping/:level_no", [authMiddleware, isSuperAdmin], updateLevelCapping);
-router.delete("/level-capping/:id", [authMiddleware, isSuperAdmin], deleteLevelCapping);
+router.post(
+  "/level-capping",
+  [authMiddleware, isSuperAdmin],
+  createLevelCapping,
+);
+router.put(
+  "/level-capping/:level_no",
+  [authMiddleware, isSuperAdmin],
+  updateLevelCapping,
+);
+router.delete(
+  "/level-capping/:id",
+  [authMiddleware, isSuperAdmin],
+  deleteLevelCapping,
+);
 
 module.exports = router;
-
-
