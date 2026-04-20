@@ -3,7 +3,7 @@ const bcrypt = require("bcrypt");
 const crypto = require("crypto");
 const fs = require("fs/promises");
 const pathModule = require("path");
-
+const otpService = require("../utils/otpService");
 exports.getDownline = async (req, res) => {
   try {
     // We get the logged-in user's path from the request (sent by middleware)
@@ -180,194 +180,6 @@ exports.updateKycStatus = async (req, res) => {
     res.status(500).json({ status: false, error: "Server error" });
   }
 };
-
-// exports.createUser = async (req, res) => {
-//   const {
-//     fullName: full_name,
-//     aadhaarNo: aadhaar_no,
-//     dob,
-//     gender,
-//     panNo: pan_no,
-//     email,
-//     whatsappNo: whatsapp_no,
-//     phone,
-//     address,
-//     city,
-//     state,
-//     pin,
-//     bankName: bank_name,
-//     accountHolderName: account_holder_name,
-//     accountNo: account_no,
-//     ifscCode: ifsc_code,
-//     branch,
-
-//     referrerName: referrer_name,
-//     referrerContact: referrer_contact,
-//     referral_code,
-//     nomineeName: nominee_name,
-//     nomineeRelationship: nominee_relationship,
-//     nomineeAge: nominee_age,
-//     nomineeContact: nominee_contact,
-//     nomineeAadhaar: nominee_aadhaar,
-//     businessLevel: business_level,
-//     agreedToTerms: agreed_to_terms,
-//     password,
-//     referrer_id,
-//   } = req.body;
-
-//   try {
-//     if (!password) {
-//       return res.status(400).json({
-//         status: false,
-//         message: "Password is required for user creation.",
-//       });
-//     }
-
-//     // Auto-generate unique 10-digit username
-//     const generateUsername = async () => {
-//       let username;
-//       let attempts = 0;
-//       while (attempts < 3) {
-//         username = crypto.randomInt(1000000000, 9999999999).toString();
-//         const exists = await db.query(
-//           "SELECT 1 FROM users WHERE username = $1",
-//           [username],
-//         );
-//         if (exists.rows.length === 0) return username;
-//         attempts++;
-//       }
-//       throw new Error("Failed to generate unique username");
-//     };
-
-//     const username = await generateUsername();
-
-//     // Hash password
-//     const salt = await bcrypt.genSalt(10);
-//     const hashedPassword = await bcrypt.hash(password, salt);
-
-//     let nodePath = "";
-//     if (referrer_id) {
-//       const referrer = await db.query(
-//         "SELECT node_path FROM users WHERE id = $1",
-//         [referrer_id],
-//       );
-//       if (referrer.rows.length > 0) {
-//         nodePath = `${referrer.rows[0].node_path}.${username}`;
-//       }
-//     } else {
-//       nodePath = username;
-//     }
-
-//     // Generate or validate referral_code (FSYYMMSN format)
-//     let finalReferralCode = referral_code;
-
-//     if (finalReferralCode) {
-//       // Validate provided code exists
-//       const exists = await db.query(
-//         "SELECT 1 FROM users WHERE referral_code = $1",
-//         [finalReferralCode],
-//       );
-//       if (exists.rows.length > 0) {
-//         return res
-//           .status(400)
-//           .json({ status: false, message: "Referral code already exists" });
-//       }
-//     } else {
-//       // Auto-generate FS + YY + MM + SN (sequential per year-month)
-//       const now = new Date();
-//       const year = (now.getFullYear() % 100).toString().padStart(2, "0");
-//       const month = (now.getMonth() + 1).toString().padStart(2, "0");
-//       const prefix = `FS${year}${month}`;
-
-//       let sn = 1;
-//       let attempts = 0;
-//       const maxAttempts = 100;
-//       while (attempts < maxAttempts) {
-//         const snStr = sn.toString().padStart(4, "0"); // Allow up to 9999 per month
-//         const candidateCode = `${prefix}${snStr}`;
-//         if (candidateCode.length > 20) {
-//           throw new Error("Referral code too long");
-//         }
-
-//         const exists = await db.query(
-//           "SELECT 1 FROM users WHERE referral_code = $1",
-//           [candidateCode],
-//         );
-//         if (exists.rows.length === 0) {
-//           finalReferralCode = candidateCode;
-//           break;
-//         }
-//         sn++;
-//         attempts++;
-//       }
-//       if (!finalReferralCode) {
-//         return res.status(400).json({
-//           status: false,
-//           message: "Unable to generate unique referral code. Try later.",
-//         });
-//       }
-//     }
-
-//     // INSERT all fields + phone (email, phone, whatsapp_no...)
-//     const newUser = await db.query(
-//       `
-//             INSERT INTO users (
-//                 full_name, aadhaar_no, dob, gender, pan_no, email, phone, whatsapp_no, address, city, state, pin,
-//                 bank_name, account_holder_name, account_no, ifsc_code, branch,
-//                 referral_code, referrer_name, referrer_contact,
-//                 nominee_name, nominee_relationship, nominee_age, nominee_contact, nominee_aadhaar,
-//                 business_level, agreed_to_terms, kyc_status, username, password_hash, referrer_id, node_path
-//             ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, $29, $30, $31, $32)
-//             RETURNING *
-//         `,
-//       [
-//         full_name || null,
-//         aadhaar_no || null,
-//         dob,
-//         gender || null,
-//         pan_no || null,
-//         email || null,
-//         phone || null,
-//         whatsapp_no || null,
-//         address || null,
-//         city || null,
-//         state || null,
-//         pin || null,
-//         bank_name || null,
-//         account_holder_name || null,
-//         account_no || null,
-//         ifsc_code || null,
-//         branch || null,
-//         finalReferralCode,
-//         referrer_name || null,
-//         referrer_contact || null,
-//         nominee_name || null,
-//         nominee_relationship || null,
-//         nominee_age,
-//         nominee_contact || null,
-//         nominee_aadhaar || null,
-//         Number(business_level) || 1,
-//         !!agreed_to_terms,
-//         false, // kyc_status default
-//         username,
-//         hashedPassword,
-//         referrer_id || null,
-//         nodePath,
-//       ],
-//     );
-
-//     res.status(201).json({
-//       status: true,
-//       message: "User created successfully with full profile",
-//       user: newUser.rows[0],
-//     });
-//   } catch (err) {
-//     console.error(err.message);
-//     res
-//       .status(500)
-//       .json({ status: false, message: "Server Error", error: err.message });
-//   }
-// };
 
 const generateUsername = async (client) => {
   let username;
@@ -863,5 +675,192 @@ exports.changePassword = async (req, res) => {
   } catch (err) {
     console.error(err);
     res.status(500).json({ status: false, error: "Server error" });
+  }
+};
+
+// reset password flow
+// step 1 - send otp
+const phoneRegex = /^[6-9]\d{9}$/;
+const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+exports.sendOtp = async (req, res) => {
+  try {
+    const { identifier, purpose = "reset-password" } = req.body;
+
+    if (!identifier) {
+      return res
+        .status(400)
+        .json({ success: false, error: "Identifier is required" });
+    }
+
+    // 1. Determine if identifier is email or phone
+    let queryField = "";
+    if (phoneRegex.test(identifier)) {
+      queryField = "phone";
+    } else if (emailRegex.test(identifier)) {
+      queryField = "email";
+    } else {
+      return res.status(400).json({
+        success: false,
+        error: "Enter valid 10-digit phone or email",
+      });
+    }
+
+    // 2. Find the user by that specific field
+    const userResult = await db.query(
+      `SELECT id, email, phone FROM users WHERE ${queryField} = $1`,
+      [identifier],
+    );
+
+    if (userResult.rows.length === 0) {
+      return res.status(404).json({ success: false, error: "User not found" });
+    }
+
+    const user = userResult.rows[0];
+
+    // 3. Send OTP using the found user's ID
+    const result = await otpService.sendOTP(user.id, purpose);
+
+    res.json({
+      success: true,
+      message: `OTP sent to ${result.sentTo}`,
+      expiresAt: result.expiresAt,
+      otp: result.otp,
+    });
+  } catch (err) {
+    console.error("Send OTP Error:", err);
+    res.status(500).json({ success: false, error: "Internal server error" });
+  }
+};
+
+exports.verifyOtp = async (req, res) => {
+  try {
+    const { identifier, otp, purpose = "reset-password", type } = req.body;
+
+    // 1. Basic Validation
+    if (!identifier || !otp) {
+      return res
+        .status(400)
+        .json({ success: false, error: "Identifier and OTP are required" });
+    }
+
+    // 2. Determine if identifier is email or phone
+    let queryField = "";
+    if (phoneRegex.test(identifier)) {
+      queryField = "phone";
+    } else if (emailRegex.test(identifier)) {
+      queryField = "email";
+    } else {
+      return res
+        .status(400)
+        .json({ success: false, error: "Invalid email or phone format" });
+    }
+
+    // 3. Find user and their OTP record in one flow (or two queries)
+    const userResult = await db.query(
+      `SELECT id FROM users WHERE ${queryField} = $1`,
+      [identifier],
+    );
+
+    if (userResult.rows.length === 0) {
+      return res.status(404).json({ success: false, error: "User not found" });
+    }
+
+    const userId = userResult.rows[0].id;
+
+    // 4. Check the OTP table
+    const otpResult = await db.query(
+      `SELECT * FROM user_otps WHERE user_id = $1 AND purpose = $2`,
+      [userId, purpose],
+    );
+
+    if (otpResult.rows.length === 0) {
+      return res
+        .status(400)
+        .json({ success: false, error: "No OTP found for this user" });
+    }
+
+    const dbOtp = otpResult.rows[0];
+
+    // 5. Check if expired
+    if (new Date() > new Date(dbOtp.expires_at)) {
+      return res.status(400).json({ success: false, error: "OTP has expired" });
+    }
+
+    // 6. Check if match
+    if (dbOtp.otp !== otp) {
+      return res.status(400).json({ success: false, error: "Incorrect OTP" });
+    }
+
+    // 7. Success! Delete the OTP so it can't be used again
+    await db.query(
+      `DELETE FROM user_otps WHERE user_id = $1 AND purpose = $2`,
+      [userId, purpose],
+    );
+
+    res.json({
+      success: true,
+      message: "OTP verified successfully",
+      userId: userId, // You can return this to proceed with password reset
+    });
+  } catch (error) {
+    console.error("Verify OTP Error:", error);
+    res.status(500).json({ success: false, error: "Server error" });
+  }
+};
+
+exports.resetPassword = async (req, res) => {
+  try {
+    const { identifier, newPassword, otp } = req.body;
+
+    // 1. Basic Validation
+    if (!identifier || !newPassword || !otp) {
+      return res
+        .status(400)
+        .json({ success: false, error: "All fields are required" });
+    }
+
+    // 2. Identify if identifier is email or phone
+    const phoneRegex = /^[6-9]\d{9}$/;
+    const queryField = phoneRegex.test(identifier) ? "phone" : "email";
+
+    // 3. Find user and their OTP
+    const userResult = await db.query(
+      `SELECT u.id 
+       FROM users u        
+       WHERE u.${queryField} = $1 `,
+      [identifier],
+    );
+
+    if (userResult.rows.length === 0) {
+      return res
+        .status(400)
+        .json({ success: false, error: "Invalid request or OTP expired" });
+    }
+
+    const { id: userId } = userResult.rows[0];
+
+    // 5. Hash the new password
+    const saltRounds = 10;
+    const hashedPassword = await bcrypt.hash(newPassword, saltRounds);
+
+    // 6. Update password and delete the used OTP in a transaction
+    await db.query("BEGIN");
+
+    await db.query(
+      "UPDATE users SET password_hash = $1, last_password_change = NOW() WHERE id = $2",
+      [hashedPassword, userId],
+    );
+
+    await db.query("COMMIT");
+
+    res.json({
+      success: true,
+      message: "Password has been reset successfully. You can now login.",
+    });
+  } catch (error) {
+    await db.query("ROLLBACK"); // Cancel database changes if something fails
+    console.error("Reset Password Error:", error);
+    res.status(500).json({ success: false, error: "Internal server error" });
   }
 };

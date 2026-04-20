@@ -1,11 +1,12 @@
-# Add Product Image to Order Items - TODO
+# Login Attempt Protection Feature
 
-## Plan Steps:
-- [x] 1. Create migration file for adding product_image column to order_items
-- [x] 2. Edit controllers/orderController.js to fetch and store product_image during order placement  
-- [x] 3. Update getOrderDetail query to include product_image in response
-- [ ] 4. Run migration: `node scripts/run-migration.js migrations/0016_add_product_image_to_order_items.sql`
-- [ ] 5. Test order creation and verify image storage
-- [ ] 6. Task complete
+## Steps:
 
-**Next:** Step 1 - Migration creation
+- [x] 1. Update migrations/migration.sql - add failed_attempts, locked_until to users table
+- [x] 2. Update controllers/authController.js - fix login query bug, add sendLoginOtp, update login logic with attempts/lock/OTP
+- [x] 3. Update routes/authRoutes.js - add POST /send-login-otp route
+- [ ] 4. Test: Run migration, simulate 3 failed logins, send OTP, login with OTP
+- [ ] 5. Optional: Extend userController.js OTP for username + 'login' purpose if needed
+- [ ] 6. Complete
+
+Current: Starting step 1

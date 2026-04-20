@@ -2,6 +2,7 @@ const db = require("../config/db");
 const bcrypt = require("bcrypt");
 const jwt = require("jsonwebtoken");
 const crypto = require("crypto");
+const otpService = require("../utils/otpService");
 
 // exports.register = async (req, res) => {
 //     const { phone, email, password, referrer_id } = req.body;
@@ -166,53 +167,273 @@ exports.register = async (req, res) => {
   }
 };
 
-exports.login = async (req, res) => {
-  const { identifier, password } = req.body;
+exports.sendLoginOtp = async (req, res) => {
+  const { identifier } = req.body;
 
-  if (!identifier || !password) {
+  if (!identifier) {
     return res
       .status(400)
-      .json({
-        message: "Identifier (username/phone/email) and password required",
-      });
+      .json({ status: false, message: "Identifier required" });
   }
 
   try {
-    // Find user by username OR phone OR email
-    const user = await db.query(
-      "SELECT * FROM users WHERE username = $1 OR phone = $1 LIMIT 1",
-      [req.body[identifier]],
+    const userResult = await db.query(
+      "SELECT id FROM users WHERE username = $1 OR phone = $1 OR email = $1 LIMIT 1",
+      [identifier],
     );
 
-    if (user.rows.length === 0) {
-      return res
-        .status(202)
-        .json({ status: false, message: "Invalid username or phone" });
+    if (userResult.rows.length === 0) {
+      return res.status(404).json({ status: false, message: "User not found" });
     }
 
-    // Compare password
-    const isMatch = await bcrypt.compare(password, user.rows[0].password_hash);
-    if (!isMatch) {
+    const result = await otpService.sendOTP(userResult.rows[0].id, "login");
+
+    res.json({
+      status: true,
+      message: `OTP sent to ${result.sentTo}`,
+      expiresAt: result.expiresAt,
+    });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ status: false, message: "Server error" });
+  }
+};
+
+// exports.login = async (req, res) => {
+//   const { identifier, password, otp } = req.body;
+
+//   if (!identifier || !password) {
+//     return res.status(400).json({
+//       message: "Identifier and password required",
+//     });
+//   }
+
+//   try {
+//     const userResult = await db.query(
+//       "SELECT * FROM users WHERE username = $1 OR phone = $1 OR email = $1 LIMIT 1",
+//       [identifier],
+//     );
+
+//     if (userResult.rows.length === 0) {
+//       return res
+//         .status(202)
+//         .json({ status: false, message: "Invalid credentials" });
+//     }
+
+//     const user = userResult.rows[0];
+//     const now = new Date();
+
+//     if (user.locked_until && new Date(user.locked_until) > now) {
+//       if (!otp) {
+//         return res.status(423).json({
+//           status: false,
+//           requires_otp: true,
+//           message: "Account locked. OTP required to unlock.",
+//         });
+//       }
+
+//       const otpValid = await otpService.verifyOTP(user.id, otp, "login");
+//       if (!otpValid) {
+//         return res.status(400).json({ status: false, message: "Invalid OTP" });
+//       }
+
+//       await db.query(
+//         "UPDATE users SET failed_attempts = 0, locked_until = NULL WHERE id = $1",
+//         [user.id],
+//       );
+//     } else if (user.failed_attempts >= 3) {
+//       await db.query(
+//         "UPDATE users SET locked_until = NOW() + INTERVAL '15 minutes' WHERE id = $1",
+//         [user.id],
+//       );
+//       return res.status(423).json({
+//         status: false,
+//         requires_otp: true,
+//         message: "Too many attempts. Locked for 15 min. Get OTP first.",
+//       });
+//     }
+
+//     const isMatch = await bcrypt.compare(password, user.password_hash);
+//     console.log("match - ", isMatch);
+
+//     if (!isMatch) {
+//       await db.query(
+//         "UPDATE users SET failed_attempts = failed_attempts + 1 WHERE id = $1",
+//         [user.id],
+//       );
+
+//       const updated = await db.query(
+//         "SELECT failed_attempts FROM users WHERE id = $1",
+//         [user.id],
+//       );
+//       if (updated.rows[0].failed_attempts >= 3) {
+//         await db.query(
+//           "UPDATE users SET locked_until = NOW() + INTERVAL '15 minutes' WHERE id = $1",
+//           [user.id],
+//         );
+//       }
+
+//       return res
+//         .status(202)
+//         .json({ status: false, message: "Invalid credentials" });
+//     }
+
+//     await db.query(
+//       "UPDATE users SET failed_attempts = 0, locked_until = NULL WHERE id = $1",
+//       [user.id],
+//     );
+
+//     const profile = await db.query(
+//       "SELECT file_url FROM kyc_documents WHERE user_id = $1 AND document_type = 'profile' LIMIT 1",
+//       [user.id],
+//     );
+
+//     const userWithPic = {
+//       ...user.toObject(),
+//       profile_pic: profile.rows[0]?.file_url || null,
+//     };
+
+//     const token = jwt.sign(
+//       {
+//         id: user.id,
+//         role: user.role || "user",
+//         username: user.username,
+//         kyc_status: user.kyc_status,
+//       },
+//       process.env.JWT_SECRET,
+//       { expiresIn: "1d" },
+//     );
+
+//     res.json({
+//       status: true,
+//       token,
+//       user: userWithPic,
+//     });
+//   } catch (err) {
+//     console.error(err.message);
+//     res.status(500).json({ status: false, message: "Server Error" });
+//   }
+// };
+
+exports.login = async (req, res) => {
+  // Destructure phone and email from body in case identifier is just a label
+  const { identifier, password, otp, phone, email } = req.body;
+
+  // 1. Resolve the actual identity value
+  // If identifier is "phone", use the phone field. If it's "email", use email field.
+  // Otherwise, assume identifier itself is the value.
+  const identityValue =
+    identifier === "phone"
+      ? phone
+      : identifier === "email"
+      ? email
+      : identifier;
+
+  if (!identityValue || !password) {
+    return res.status(400).json({
+      status: false,
+      message: "Credentials required",
+    });
+  }
+
+  try {
+    const userResult = await db.query(
+      "SELECT * FROM users WHERE username = $1 OR phone = $1 OR email = $1 LIMIT 1",
+      [identityValue],
+    );
+
+    if (userResult.rows.length === 0) {
       return res
         .status(202)
         .json({ status: false, message: "Invalid credentials" });
     }
 
-    const profile = await db.query(
-      "SELECT * FROM kyc_documents WHERE user_id = $1 AND document_type = $2",
-      [user.rows[0].id, "profile"],
+    const user = userResult.rows[0];
+    const now = new Date();
+
+    // 2. Lock Logic
+    if (user.locked_until && new Date(user.locked_until) > now) {
+      if (!otp) {
+        return res.status(203).json({
+          status: false,
+          requires_otp: true,
+          message: "Account locked. OTP required to unlock.",
+        });
+      }
+
+      const otpValid = await otpService.verifyOTP(user.id, otp, "login");
+      if (!otpValid) {
+        return res.status(400).json({ status: false, message: "Invalid OTP" });
+      }
+
+      await db.query(
+        "UPDATE users SET failed_attempts = 0, locked_until = NULL WHERE id = $1",
+        [user.id],
+      );
+    } else if (
+      user.failed_attempts >= 3 &&
+      (!user.locked_until || new Date(user.locked_until) < now)
+    ) {
+      // If they reached 3 attempts but weren't locked yet, lock them now
+      await db.query(
+        "UPDATE users SET locked_until = NOW() + INTERVAL '15 minutes' WHERE id = $1",
+        [user.id],
+      );
+      return res.status(423).json({
+        status: false,
+        message: "Too many attempts. Locked for 15 min.",
+      });
+    }
+
+    // 3. Password Verification
+    const isMatch = await bcrypt.compare(password, user.password_hash);
+
+    if (!isMatch) {
+      await db.query(
+        "UPDATE users SET failed_attempts = failed_attempts + 1 WHERE id = $1",
+        [user.id],
+      );
+
+      // Re-check if this attempt triggered a lock
+      if (user.failed_attempts + 1 >= 3) {
+        await db.query(
+          "UPDATE users SET locked_until = NOW() + INTERVAL '15 minutes' WHERE id = $1",
+          [user.id],
+        );
+      }
+
+      return res
+        .status(202)
+        .json({ status: false, message: "Invalid credentials" });
+    }
+
+    // 4. Success - Clear fails
+    await db.query(
+      "UPDATE users SET failed_attempts = 0, locked_until = NULL WHERE id = $1",
+      [user.id],
     );
 
-    user.rows[0].profile_pic =
-      profile.rows.length > 0 ? profile.rows[0].file_url : null;
+    // 5. Get Profile Pic
+    const profile = await db.query(
+      "SELECT file_url FROM kyc_documents WHERE user_id = $1 AND document_type = 'profile' LIMIT 1",
+      [user.id],
+    );
 
-    // JWT Token
+    // FIX: Removed .toObject() because it's PG, not Mongoose
+    // Also remove sensitive data before sending to frontend
+    const { password_hash, transaction_pin_hash, ...safeUser } = user;
+
+    const userWithPic = {
+      ...safeUser,
+      profile_pic: profile.rows[0]?.file_url || null,
+    };
+
     const token = jwt.sign(
       {
-        id: user.rows[0].id,
-        role: user.rows[0].role,
-        username: user.rows[0].username,
-        kyc_status: user.rows[0].kyc_status,
+        id: user.id,
+        role: user.role || "user",
+        username: user.username,
+        kyc_status: user.kyc_status,
       },
       process.env.JWT_SECRET,
       { expiresIn: "1d" },
@@ -221,10 +442,10 @@ exports.login = async (req, res) => {
     res.json({
       status: true,
       token,
-      user: user.rows[0],
+      user: userWithPic,
     });
   } catch (err) {
-    console.error(err.message);
-    res.status(500).send("Server Error");
+    console.error(err);
+    res.status(500).json({ status: false, message: "Server Error" });
   }
 };

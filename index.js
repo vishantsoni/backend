@@ -39,6 +39,7 @@ app.use("/api/settings", require("./routes/settingsRoutes"));
 app.use("/api/orders", require("./routes/orderRoutes"));
 app.use("/api/ecom", require("./routes/ecomRoutes"));
 app.use("/api/plan", require("./routes/planPurchaseRoute"));
+app.use("/api/payment", require("./routes/razorpayRoute"));
 app.post("/api/upload", async (req, res) => {
   try {
     // 1. चेक करें कि फाइल्स आई हैं या नहीं
