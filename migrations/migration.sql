@@ -1,3 +1,5 @@
 -- Login attempt protection: add failed attempts tracking to users table
-ALTER TABLE users ADD COLUMN IF NOT EXISTS failed_attempts INTEGER DEFAULT 0;
-ALTER TABLE users ADD COLUMN IF NOT EXISTS locked_until TIMESTAMP WITH TIME ZONE NULL;
+ALTER TABLE orders ADD COLUMN IF NOT EXISTS commission_status TEXT DEFAULT NULL;
+ALTER TABLE orders ADD COLUMN IF NOT EXISTS distributor_id INTEGER DEFAULT NULL;
+ALTER TABLE e_user_addresses ADD COLUMN IF NOT EXISTS distributor_id INTEGER DEFAULT NULL;
+ALTER TABLE e_carts ADD COLUMN IF NOT EXISTS distributor_id INTEGER DEFAULT NULL;

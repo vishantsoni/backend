@@ -321,33 +321,41 @@ exports.getAllOrders = async (req, res) => {
 
     const ordersQuery = `
       SELECT 
-        o.*, 
-        u.name as user_name, 
-        u.phone as user_phone,
-        -- json_agg ko explicitly ::jsonb mein cast kiya gaya hai
-        COALESCE(
-          (SELECT json_agg(items)::jsonb 
-           FROM (
-             SELECT 
-               oi.id, 
-               oi.product_name, 
-               oi.product_image, 
-               oi.variant_sku, 
-               oi.variant_details, 
-               oi.qty, 
-               oi.unit_price,
-               oi.total_item_price
-             FROM order_items oi 
-             WHERE oi.order_id = o.id
-           ) items
-          ), '[]'::jsonb
-        ) as products,
-        (SELECT COUNT(*)::int FROM order_items WHERE order_id = o.id) as item_count
-      FROM orders o 
-      JOIN ecom_user u ON o.user_id = u.id
-      ${whereClause}
-      ORDER BY o.created_at DESC 
-      LIMIT $${params.length + 1} OFFSET $${params.length + 2}
+  o.*, 
+  CASE 
+    WHEN o.user_id IS NOT NULL THEN 'User'
+    WHEN o.distributor_id IS NOT NULL THEN 'Distributor'
+    ELSE 'Unknown'
+  END as user_type,
+  -- Pick distributor name if user_name is null, and vice versa
+  COALESCE(u.name, d.full_name, d.username) as user_name, 
+  COALESCE(u.phone, d.phone) as user_phone,
+  
+  COALESCE(
+    (SELECT json_agg(items)::jsonb 
+     FROM (
+       SELECT 
+         oi.id, 
+         oi.product_name, 
+         oi.product_image, 
+         oi.variant_sku, 
+         oi.variant_details, 
+         oi.qty, 
+         oi.unit_price,
+         oi.total_item_price
+       FROM order_items oi 
+       WHERE oi.order_id = o.id
+     ) items
+    ), '[]'::jsonb
+  ) as products,
+  (SELECT COUNT(*)::int FROM order_items WHERE order_id = o.id) as item_count
+FROM orders o 
+-- Use LEFT JOIN because an order might not have one of these
+LEFT JOIN ecom_user u ON o.user_id = u.id
+LEFT JOIN users d ON o.distributor_id = d.id 
+${whereClause}
+ORDER BY o.created_at DESC 
+LIMIT $${params.length + 1} OFFSET $${params.length + 2}
     `;
 
     const orders = await db.query(ordersQuery, [

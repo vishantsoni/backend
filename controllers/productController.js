@@ -187,6 +187,127 @@ exports.getProducts = async (req, res) => {
   }
 };
 
+// distributor products
+exports.getProductsForDistributor = async (req, res) => {
+  try {
+    const { status } = req.query;
+    let whereClause = "WHERE 1=1";
+    const values = [];
+    if (status) {
+      if (status === "all") {
+        whereClause += " AND p.status IN ('active', 'inactive', 'trash')";
+      } else {
+        whereClause += ` AND p.status = $${values.length + 1}`;
+        values.push(status);
+      }
+    }
+
+    // v.* as varient_data
+    const result = await db.query(
+      `
+      SELECT 
+        jsonb_build_object(
+          'id', p.id,
+          'cat_id', p.cat_id,
+          'name', p.name,
+          'description', p.description,
+          'slug', p.slug,
+          'f_image', p.f_image,
+          'g_image', p.g_image,
+          'tax_id', p.tax_id,
+          'base_price', p.base_price,
+          'discounted_price', COALESCE(p.discounted_price, p.base_price),
+          'subcategories', p.subcategories,
+          'attributes', p.attributes,
+          'status', p.status,
+          'created_at', p.created_at
+        ) AS product,
+        
+        jsonb_build_object(
+          'id', c.id, 
+          'name', c.name, 
+          'slug', c.slug
+        ) AS category,
+        
+        COALESCE((
+          SELECT jsonb_agg(
+            jsonb_build_object('id', sc.id, 'name', sc.name, 'slug', sc.slug)
+          )
+          FROM categories sc 
+          WHERE sc.id = ANY(p.subcategories)
+        ), '[]'::jsonb) AS subcategories,
+        
+        -- Product attributes WITH their values for frontend dropdowns
+        COALESCE((
+          SELECT jsonb_agg(
+            jsonb_build_object(
+              'id', a.id, 
+              'name', a.name,
+              'values', COALESCE((
+                SELECT jsonb_agg(
+                  jsonb_build_object('id', av.id, 'value', av.value)
+                )
+                FROM attr_values av 
+                WHERE av.attr_id = a.id
+              ), '[]'::jsonb)
+            )
+          )
+          FROM attributes a 
+          WHERE a.id = ANY(p.attributes)
+        ), '[]'::jsonb) AS product_attributes,
+        
+        -- ALL variants WITH attr_combinations for frontend matching
+        COALESCE((
+          SELECT jsonb_agg(
+            jsonb_build_object(
+              'id', v.id,
+              'sku', v.sku,
+              'price', v.price,
+              'stock', v.stock,
+              'bv_point', v.bv_point,
+              'attr_combinations', COALESCE((
+                SELECT jsonb_agg(
+                  jsonb_build_object(
+                    'attr_value_id', vam.attr_value_id,
+                    'attr_id', av.attr_id,
+                    'value', av.value
+                  ) ORDER BY av.attr_id
+                )
+                FROM variant_attr_mapping vam
+                JOIN attr_values av ON vam.attr_value_id = av.id
+                WHERE vam.variant_id = v.id
+              ), '[]'::jsonb)
+            )
+          )
+          FROM pro_variants v 
+          WHERE v.product_id = p.id
+        ), '[]'::jsonb) AS variants,
+        
+        COUNT(v2.id) AS variant_count
+        
+      FROM products p 
+      LEFT JOIN categories c ON p.cat_id = c.id
+      LEFT JOIN pro_variants v2 ON p.id = v2.product_id
+      
+      GROUP BY p.id, c.id, p.name, p.description, p.f_image, p.g_image, p.tax_id, 
+               p.base_price, p.discounted_price, p.subcategories, p.attributes, 
+               p.status, p.created_at, c.name, c.slug
+      `,
+    );
+    res.status(200).json({
+      success: true,
+      message: "Products fetched successfully",
+      data: result.rows,
+    });
+  } catch (error) {
+    console.error("Error fetching products:", error);
+    res.status(500).json({
+      success: false,
+      message: "Internal server error",
+    });
+  }
+};
+
 exports.createProduct = async (req, res) => {
   try {
     const {
@@ -381,7 +502,8 @@ exports.getProductByslug = async (req, res) => {
         message: "Valid slug is required",
       });
     }
-    const result = await db.query(`
+    const result = await db.query(
+      `
       SELECT 
         jsonb_build_object(
           'id', p.id,
@@ -469,29 +591,31 @@ exports.getProductByslug = async (req, res) => {
       GROUP BY p.id, c.id, p.name, p.description, p.f_image, p.g_image, p.tax_id, 
                p.base_price, p.discounted_price, p.subcategories, p.attributes, 
                p.status, p.created_at, c.name, c.slug
-    `, [slug]);
-    
+    `,
+      [slug],
+    );
+
     if (result.rows.length === 0) {
       return res.status(404).json({
         success: false,
         message: "Product not found",
       });
     }
-    
+
     // Flatten the single row result
     const data = result.rows[0];
-    
+
     res.status(200).json({
       success: true,
       message: "Product fetched successfully with attribute-variant mappings",
-      data: data
+      data: data,
     });
   } catch (error) {
     console.error("Error fetching product by slug:", error);
     res.status(500).json({
       success: false,
       message: "Internal server error",
-      error: error.message  // Include for debugging
+      error: error.message, // Include for debugging
     });
   }
 };
@@ -552,7 +676,9 @@ exports.updateProduct = async (req, res) => {
       paramIndex++;
     }
     values.push(productId);
-    const query = `UPDATE products SET ${updates.join(", ")} WHERE id = $${paramIndex} RETURNING *`;
+    const query = `UPDATE products SET ${updates.join(
+      ", ",
+    )} WHERE id = $${paramIndex} RETURNING *`;
     const result = await db.query(query, values);
     if (result.rowCount === 0) {
       return res.status(404).json({

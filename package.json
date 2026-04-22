@@ -6,7 +6,8 @@
     "start": "node index.js",
     "dev": "nodemon index.js",
     "migrate": "node scripts/run-migration.js",
-    "seed": "node scripts/seed-data.js"
+    "seed": "node scripts/seed-data.js",
+    "admin": "node scripts/seed-admin.js"
   },
   "dependencies": {
     "bcrypt": "^5.1.1",
