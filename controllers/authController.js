@@ -338,7 +338,10 @@ exports.login = async (req, res) => {
 
   try {
     const userResult = await db.query(
-      "SELECT * FROM users WHERE username = $1 OR phone = $1 OR email = $1 LIMIT 1",
+      `SELECT u.*, COALESCE(r.name, 'user') as role_name, COALESCE(r.permissions, '[]'::JSONB) as role_permissions 
+       FROM users u 
+       LEFT JOIN roles r ON u.role_id = r.id 
+       WHERE u.username = $1 OR u.phone = $1 OR u.email = $1 LIMIT 1`,
       [identityValue],
     );
 
@@ -431,9 +434,12 @@ exports.login = async (req, res) => {
     const token = jwt.sign(
       {
         id: user.id,
-        role: user.role || "user",
+        role: user.role_id ? user.role_name : user.role,
         username: user.username,
         kyc_status: user.kyc_status,
+        permissions: Array.isArray(user.role_permissions)
+          ? user.role_permissions
+          : [],
       },
       process.env.JWT_SECRET,
       { expiresIn: "1d" },

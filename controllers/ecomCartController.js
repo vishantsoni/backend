@@ -33,6 +33,17 @@ exports.getCart = async (req, res) => {
     p.name AS product_name, 
     p.slug, 
     p.f_image,
+    p.base_price AS price,
+    -- Tax Data Population
+        CASE 
+          WHEN p.tax_id IS NOT NULL THEN 
+            jsonb_build_object(
+              'id', t.id,
+              'name', t.tax_name,
+              'percentage', t.tax_percentage
+            )
+          ELSE NULL 
+        END AS tax_data,
     -- Variant data ko JSON format mein generate karein
     CASE 
         WHEN ci.variation_id IS NULL THEN NULL
@@ -53,27 +64,64 @@ exports.getCart = async (req, res) => {
         )
     END AS variant_details,
     (ci.variation_id IS NULL) AS is_variation_null
-FROM e_cart_items ci
-LEFT JOIN products p ON ci.product_id = p.id
-LEFT JOIN pro_variants pv ON ci.variation_id = pv.id
-WHERE ci.cart_id = $1
-ORDER BY ci.created_at DESC;`,
+    FROM e_cart_items ci
+    LEFT JOIN products p ON ci.product_id = p.id
+    LEFT JOIN pro_variants pv ON ci.variation_id = pv.id
+    LEFT JOIN tax_settings t ON t.id = p.tax_id
+    WHERE ci.cart_id = $1
+    ORDER BY ci.created_at DESC;`,
       [cartId],
     );
 
-    const totalItems = items.rows.reduce((sum, item) => sum + item.quantity, 0);
-    const total = items.rows.reduce(
-      (sum, item) => sum + item.quantity * parseFloat(item.price),
-      0,
-    );
+    let totalItems = 0;
+    let subtotal = 0;
+    let totalTaxAmount = 0;
 
+    // const totalItems = items.rows.reduce((sum, item) => sum + item.quantity, 0);
+    // const total = items.rows.reduce(
+    //   (sum, item) => sum + item.quantity * parseFloat(item.price),
+    //   0,
+    // );
+
+    items.rows.forEach((item) => {
+      const qty = parseInt(item.quantity);
+      const price = parseFloat(item.price);
+      const taxPercent = item.tax_data
+        ? parseFloat(item.tax_data.percentage)
+        : 0;
+
+      const itemSubtotal = qty * price;
+      const itemTax = itemSubtotal * (taxPercent / 100);
+
+      totalItems += qty;
+      subtotal += itemSubtotal;
+      totalTaxAmount += itemTax;
+
+      // Store calculated values back in the item object for frontend display
+      item.item_subtotal = parseFloat(itemSubtotal.toFixed(2));
+      item.item_tax = parseFloat(itemTax.toFixed(2));
+    });
+
+    const grandTotal = subtotal + totalTaxAmount;
+
+    // res.json({
+    //   status: true,
+    //   cart: {
+    //     id: cartId,
+    //     items: items.rows,
+    //     total_items: totalItems,
+    //     total: parseFloat(total.toFixed(2)),
+    //   },
+    // });
     res.json({
       status: true,
       cart: {
         id: cartId,
         items: items.rows,
         total_items: totalItems,
-        total: parseFloat(total.toFixed(2)),
+        subtotal: parseFloat(subtotal.toFixed(2)),
+        total_tax: parseFloat(totalTaxAmount.toFixed(2)),
+        total: parseFloat(grandTotal.toFixed(2)),
       },
     });
   } catch (err) {
@@ -101,12 +149,81 @@ exports.get_d_Cart = async (req, res) => {
 
     const cartId = cartResult.rows[0].id;
 
-    const items = await db.query(
-      `SELECT 
+    // const query = `SELECT
+    // ci.*,
+    // p.name AS product_name,
+    // p.slug,
+    // p.f_image,
+    // p.base_price AS price,
+    // -- Tax Data Population
+    //     CASE
+    //       WHEN p.tax_id IS NOT NULL THEN
+    //         jsonb_build_object(
+    //           'id', t.id,
+    //           'name', t.tax_name,
+    //           'percentage', t.tax_percentage
+    //         )
+    //       ELSE NULL
+    //     END AS tax_data,
+    // -- Variant data ko JSON format mein generate karein
+    // CASE
+    //     WHEN ci.variation_id IS NULL THEN NULL
+    //     ELSE json_build_object(
+    //         'id', pv.id,
+    //         'price', pv.price,
+    //         'stock', pv.stock,
+    //         'attributes', (
+    //             SELECT json_agg(json_build_object(
+    //                 'attribute_name', a.name,
+    //                 'value', av.value
+    //             ))
+    //             FROM variant_attr_mapping vam
+    //             JOIN attr_values av ON vam.attr_value_id = av.id
+    //             JOIN attributes a ON av.attr_id = a.id
+    //             WHERE vam.variant_id = ci.variation_id
+    //         )
+    //     )
+    // END AS variant_details,
+    // (ci.variation_id IS NULL) AS is_variation_null
+    // FROM e_cart_items ci
+    // LEFT JOIN products p ON ci.product_id = p.id
+    // LEFT JOIN pro_variants pv ON ci.variation_id = pv.id
+    // LEFT JOIN tax_settings t ON t.id = p.tax_id
+    // WHERE ci.cart_id = $1
+    // ORDER BY ci.created_at DESC;`;
+
+    const query = `SELECT 
     ci.*, 
     p.name AS product_name, 
     p.slug, 
     p.f_image,
+    COALESCE(pv.price, p.base_price) AS unit_price,
+    ROUND(
+        (COALESCE(pv.price, p.base_price) * COALESCE(t.tax_percentage, 0) / 100)::numeric, 
+        2
+    ) AS tax_amount,
+
+    ROUND(
+        (COALESCE(pv.price, p.base_price) * (1 + COALESCE(t.tax_percentage, 0) / 100))::numeric, 
+        2
+    ) AS total_unit_price,
+
+    -- 4. Subtotal (Total Unit Price * Quantity)
+    ROUND(
+        (ci.quantity * (COALESCE(pv.price, p.base_price) * (1 + COALESCE(t.tax_percentage, 0) / 100)))::numeric, 
+        2
+    ) AS item_subtotal,
+
+    -- Tax Data Population
+        CASE 
+          WHEN p.tax_id IS NOT NULL THEN 
+            jsonb_build_object(
+              'id', t.id,
+              'name', t.tax_name,
+              'percentage', t.tax_percentage
+            )
+          ELSE NULL 
+        END AS tax_data,
     -- Variant data ko JSON format mein generate karein
     CASE 
         WHEN ci.variation_id IS NULL THEN NULL
@@ -127,13 +244,14 @@ exports.get_d_Cart = async (req, res) => {
         )
     END AS variant_details,
     (ci.variation_id IS NULL) AS is_variation_null
-FROM e_cart_items ci
-LEFT JOIN products p ON ci.product_id = p.id
-LEFT JOIN pro_variants pv ON ci.variation_id = pv.id
-WHERE ci.cart_id = $1
-ORDER BY ci.created_at DESC;`,
-      [cartId],
-    );
+    FROM e_cart_items ci
+    LEFT JOIN products p ON ci.product_id = p.id
+    LEFT JOIN pro_variants pv ON ci.variation_id = pv.id
+    LEFT JOIN tax_settings t ON t.id = p.tax_id
+    WHERE ci.cart_id = $1
+    ORDER BY ci.created_at DESC;`;
+
+    const items = await db.query(query, [cartId]);
 
     const totalItems = items.rows.reduce((sum, item) => sum + item.quantity, 0);
     const total = items.rows.reduce(

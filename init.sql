@@ -266,3 +266,20 @@ CREATE INDEX idx_banners_status_order ON banners(status, display_order);
 ALTER TABLE users ADD COLUMN IF NOT EXISTS kyc_status BOOLEAN DEFAULT FALSE;
 COMMENT ON COLUMN users.kyc_status IS 'User KYC verification status - FALSE=Pending, TRUE=Approved';
 CREATE INDEX IF NOT EXISTS idx_users_kyc_status ON users(kyc_status);
+
+-- Distributor Inventory Table
+CREATE TABLE IF NOT EXISTS distributor_inventory (
+    id SERIAL PRIMARY KEY,
+    distributor_id INTEGER REFERENCES users(id) ON DELETE CASCADE NOT NULL,
+    product_id INTEGER REFERENCES products(id) ON DELETE CASCADE NOT NULL,
+    variant_id INTEGER REFERENCES pro_variants(id) ON DELETE CASCADE,
+    quantity INTEGER NOT NULL DEFAULT 0,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_distributor_inventory_unique
+ON distributor_inventory (distributor_id, product_id, COALESCE(variant_id, 0));
+
+CREATE INDEX IF NOT EXISTS idx_distributor_inventory_distributor_id ON distributor_inventory(distributor_id);
+CREATE INDEX IF NOT EXISTS idx_distributor_inventory_product_id ON distributor_inventory(product_id);

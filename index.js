@@ -36,10 +36,17 @@ app.use("/api/static", require("./routes/staticRoutes"));
 app.use("/api/wallet", require("./routes/walletRoutes"));
 app.use("/api/transactions", require("./routes/transactionRoutes"));
 app.use("/api/settings", require("./routes/settingsRoutes"));
+app.use("/api/tax", require("./routes/taxRoute"));
 app.use("/api/orders", require("./routes/orderRoutes"));
 app.use("/api/ecom", require("./routes/ecomRoutes"));
 app.use("/api/plan", require("./routes/planPurchaseRoute"));
 app.use("/api/payment", require("./routes/razorpayRoute"));
+app.use("/api/roles", require("./routes/rolesRoutes"));
+app.use("/api/staff", require("./routes/staffRoutes"));
+app.use("/api/notifications", require("./routes/notificationRoutes"));
+app.use("/api/inventory", require("./routes/inventoryRoutes"));
+app.use("/api/reports", require("./routes/reportRoute"));
+app.use("/api/dashboard", require("./routes/dashboardRoutes"));
 app.post("/api/upload", async (req, res) => {
   try {
     // 1. चेक करें कि फाइल्स आई हैं या नहीं

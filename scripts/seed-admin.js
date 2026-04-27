@@ -2,16 +2,15 @@ const pool = require("../config/db");
 const bcrypt = require("bcrypt");
 
 async function seedAdminData() {
+  const client = await pool.connect();
   try {
-    // Generate unique username for admin (10-digit like system)
-    const username = "9999999999"; // Use phone as username for simplicity, or generate if needed
+    await client.query("BEGIN");
 
-    // Hash password with same salt rounds as auth
+    const username = "9999999999";
     const salt = await bcrypt.genSalt(10);
     const hashedPassword = await bcrypt.hash("12345678", salt);
 
-    // Insert Super Admin with full schema (ON CONFLICT DO NOTHING)
-    await pool.query(
+    const newUser = await client.query(
       `INSERT INTO users (
         full_name, aadhaar_no, dob, gender, pan_no, email, phone, whatsapp_no,
         address, city, state, pin,
@@ -29,54 +28,71 @@ async function seedAdminData() {
         $26,$27,$28,
         $29,$30,$31,
         $32,$33,$34,$35
-      ) ON CONFLICT (phone) DO NOTHING`,
+      ) ON CONFLICT (phone) DO NOTHING RETURNING id`, // Added RETURNING id here
       [
-        "Super Admin", // $1 full_name
-        null, // $2 aadhaar_no
-        "1970-01-01", // $3 dob
-        "Male", // $4 gender
-        null, // $5 pan_no
-        "admin@gmail.com", // $6 email
-        "9999999999", // $7 phone
-        null, // $8 whatsapp_no
-        null, // $9 address
-        null, // $10 city
-        null, // $11 state
-        null, // $12 pin
-        null, // $13 bank_name
-        null, // $14 account_holder_name
-        null, // $15 account_no
-        null, // $16 ifsc_code
-        null, // $17 branch
-        "ADMIN001", // $18 referral_code
-        null, // $19 referrer_name
-        null, // $20 referrer_contact
-        null, // $21 nominee_name
-        null, // $22 nominee_relationship
-        18, // $23 nominee_age
-        null, // $24 nominee_contact
-        null, // $25 nominee_aadhaar
-        99, // $26 business_level (max)
-        true, // $27 agreed_to_terms
-        true, // $28 kyc_status
-        username, // $29 username
-        hashedPassword, // $30 password_hash
-        null, // $31 referrer_id (root)
-        username, // $32 node_path
-        "1", // $33 binary_path (root left)
-        1, // $34 position (left)
-        true, // $35 is_active
+        "Super Admin",
+        null,
+        "1970-01-01",
+        "Male",
+        null,
+        "admin@gmail.com",
+        "9999999999",
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        "ADMIN001",
+        null,
+        null,
+        null,
+        null,
+        18,
+        null,
+        null,
+        99,
+        true,
+        true,
+        username,
+        hashedPassword,
+        null,
+        username,
+        "1",
+        1,
+        true,
       ],
     );
 
-    console.log("✅ Super Admin seeded successfully!");
+    // FIX: Check if newUser.rows[0] exists before accessing .id
+    if (newUser.rows.length > 0) {
+      const adminId = newUser.rows[0].id;
+
+      await client.query(
+        "INSERT INTO wallets (user_id, total_amount, left_count, right_count, paid_pairs) VALUES ($1, 0, 0, 0, 0) ON CONFLICT DO NOTHING",
+        [adminId],
+      );
+
+      await client.query("COMMIT");
+      console.log("✅ Super Admin seeded successfully!");
+    } else {
+      // If user existed, we don't need to commit a new wallet
+      await client.query("ROLLBACK");
+      console.log("ℹ️ Super Admin already exists. No changes made.");
+    }
+
     console.log("📱 Phone: 9999999999");
     console.log("🔑 Password: 12345678");
-    console.log("👑 Role: Super Admin");
   } catch (error) {
+    await client.query("ROLLBACK");
     console.error("❌ Error seeding admin data:", error);
   } finally {
-    pool.end();
+    client.release();
+    process.exit();
   }
 }
 

@@ -96,7 +96,7 @@ router.post(
 // Product CRUD routes - now with multer
 router.post(
   "/products",
-  [authMiddleware, isSuperAdmin, upload.any(), processProductFiles],
+  [authMiddleware, isSuperAdmin, processProductFiles],
   createProduct,
 );
 router.get("/product-detail/:slug", getProductByslug);

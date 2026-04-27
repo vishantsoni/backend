@@ -35,11 +35,24 @@ exports.getMyDownline = async (req, res) => {
 
     const myPath = userResult.rows[0].node_path;
 
-    // Fix: Explicitly cast $1 to ltree
     const downline = await db.query(
-      `SELECT id, username, email, phone, node_path, referrer_id, created_at 
-       FROM users 
-       WHERE node_path <@ $1::ltree AND id != $2`,
+      `SELECT 
+        u.id, 
+        u.username, 
+        u.email, 
+        u.phone, 
+        u.node_path, 
+        u.referrer_id, 
+        u.created_at,
+        -- Subquery to count descendants for each row
+        (
+          SELECT COUNT(*) 
+          FROM users sub 
+          WHERE sub.node_path <@ u.node_path AND sub.id != u.id
+        )::int as referrals_count
+       FROM users u
+       WHERE u.node_path <@ $1::ltree AND u.id != $2
+       ORDER BY u.node_path ASC`,
       [myPath, req.user.id],
     );
 
@@ -58,9 +71,84 @@ exports.getMyTree = async (req, res) => {
     // By using <@ (is descendant) and including the user's own path,
     // we get the full subtree in one go.
     const result = await db.query(
-      `SELECT id, username, email, phone, full_name, node_path, referrer_id, referral_code, created_at, is_active, kyc_status 
-       FROM users 
-       WHERE node_path <@ (SELECT node_path FROM users WHERE id = $1)::ltree`,
+      `SELECT 
+        u.id, u.username, u.email, u.phone, u.full_name, u.node_path, 
+        u.referrer_id, u.referral_code, u.created_at, u.is_active, u.kyc_status,
+        -- Create a JSON object for referrer if it exists
+        CASE 
+          WHEN p.id IS NOT NULL THEN 
+            jsonb_build_object(
+              'id', p.id, 
+              'full_name', p.full_name, 
+              'username', p.username,
+              'phone', p.phone
+              )
+          ELSE NULL 
+        END as referrer
+       FROM users u
+       LEFT JOIN users p ON u.referrer_id = p.id
+       WHERE u.node_path <@ (SELECT node_path FROM users WHERE id = $1)::ltree`,
+      [userId],
+    );
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ status: false, error: "User not found" });
+    }
+
+    const flatData = result.rows;
+
+    // 2. Helper function to build the tree
+    const buildTree = (data, rootId) => {
+      return data
+        .filter((item) => item.referrer_id === rootId)
+        .map((item) => ({
+          ...item,
+          children: buildTree(data, item.id),
+        }));
+    };
+
+    // 3. Find the "Top Parent" object (the logged-in user)
+    const topUser = flatData.find((u) => u.id === userId);
+
+    // 4. Build children for the top user and return as a single object (or array)
+    const tree = {
+      ...topUser,
+      children: buildTree(flatData, userId),
+    };
+
+    // Wrapping in an array [tree] to keep it consistent with your previous structure
+    res.json({ status: true, data: [tree] });
+  } catch (err) {
+    console.error(err);
+    res.status(500).send("Server Error");
+  }
+};
+
+exports.getMyTreeById = async (req, res) => {
+  try {
+    const userId = parseInt(req.params.id);
+
+    // 1. Fetch the user AND all their descendants in one query
+    // By using <@ (is descendant) and including the user's own path,
+    // we get the full subtree in one go.
+    const result = await db.query(
+      `SELECT 
+        u.id, u.username, u.email, u.phone, u.full_name, u.node_path, 
+        u.referrer_id, u.referral_code, u.created_at, u.is_active, u.kyc_status,
+        -- Create a JSON object for referrer if it exists
+        CASE 
+          WHEN p.id IS NOT NULL THEN 
+            jsonb_build_object(
+              'id', p.id, 
+              'full_name', p.full_name, 
+              'username', p.username,
+              'phone', p.phone
+              )
+          ELSE NULL 
+        END as referrer
+       FROM users u
+       LEFT JOIN users p ON u.referrer_id = p.id
+       WHERE u.node_path <@ (SELECT node_path FROM users WHERE id = $1)::ltree`,
       [userId],
     );
 

@@ -14,6 +14,8 @@ const ecomAuth = require("../middleware/ecomAuth");
 const {
   d_p_o,
   getAllD_Orders,
+  getPlacedOrder,
+  getRecievedOrder,
 } = require("../controllers/distributor_OrderController");
 
 router.post("/", ecomAuth, placeOrder); // User place order
@@ -27,5 +29,8 @@ router.delete("/:id", [authMiddleware, isSuperAdmin], cancelOrder);
 // distributor place order
 router.post("/d_p_o", authMiddleware, d_p_o); // User place order
 router.post("/getAllD_P_O", [authMiddleware, isSuperAdmin], getAllD_Orders); // User place order
+
+router.get("/placed", [authMiddleware], getPlacedOrder); // User place order
+router.get("/received", [authMiddleware], getRecievedOrder); // User place order
 
 module.exports = router;

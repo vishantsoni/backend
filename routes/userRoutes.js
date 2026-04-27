@@ -12,6 +12,11 @@ const {
 
 router.get("/downline", auth, userController.getMyDownline);
 router.get("/tree", auth, userController.getMyTree);
+router.get(
+  "/tree-by-id/:id",
+  [auth, isSuperAdmin],
+  userController.getMyTreeById,
+);
 
 router.post("/create", userController.createUser);
 router.get("/profile-by-referral", userController.getProfile);

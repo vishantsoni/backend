@@ -147,6 +147,7 @@ exports.getProducts = async (req, res) => {
     const { status } = req.query;
     let whereClause = "WHERE 1=1";
     const values = [];
+
     if (status) {
       if (status === "all") {
         whereClause += " AND p.status IN ('active', 'inactive', 'trash')";
@@ -156,23 +157,32 @@ exports.getProducts = async (req, res) => {
       }
     }
 
-    // v.* as varient_data
     const result = await db.query(
       `
       SELECT 
-      p.*, 
-      c.name as category_name,
-      COUNT(v.id) AS variant_count
-      
+        p.*, 
+        c.name as category_name,        
+        COUNT(v.id) AS variant_count,
+        CASE 
+          WHEN p.tax_id IS NOT NULL THEN 
+            JSON_BUILD_OBJECT(
+              'id', t.id,
+              'name', t.tax_name,
+              'percentage', t.tax_percentage
+            )
+          ELSE NULL 
+        END AS tax_data
       FROM products p 
       LEFT JOIN pro_variants v ON p.id = v.product_id
-      JOIN categories c ON p.cat_id = c.id       
+      JOIN categories c ON p.cat_id = c.id
+      LEFT JOIN tax_settings t ON p.tax_id = t.id
       ${whereClause}
-      GROUP BY p.id, c.name
+      GROUP BY p.id, c.name,t.id, t.tax_name, t.tax_percentage
       ORDER BY p.id ASC
       `,
       values,
     );
+
     res.status(200).json({
       success: true,
       message: "Products fetched successfully",
@@ -190,21 +200,19 @@ exports.getProducts = async (req, res) => {
 // distributor products
 exports.getProductsForDistributor = async (req, res) => {
   try {
-    const { status } = req.query;
+    const { status = "active" } = req.query;
     let whereClause = "WHERE 1=1";
     const values = [];
-    if (status) {
-      if (status === "all") {
-        whereClause += " AND p.status IN ('active', 'inactive', 'trash')";
-      } else {
-        whereClause += ` AND p.status = $${values.length + 1}`;
-        values.push(status);
-      }
+
+    // Handling Status Filter
+    if (status !== "all") {
+      values.push(status);
+      whereClause += ` AND p.status = $${values.length}`;
+    } else {
+      whereClause += " AND p.status IN ('active', 'inactive', 'trash')";
     }
 
-    // v.* as varient_data
-    const result = await db.query(
-      `
+    const query = `
       SELECT 
         jsonb_build_object(
           'id', p.id,
@@ -215,8 +223,13 @@ exports.getProductsForDistributor = async (req, res) => {
           'f_image', p.f_image,
           'g_image', p.g_image,
           'tax_id', p.tax_id,
-          'base_price', p.base_price,
+          'unit_price', p.base_price,
           'discounted_price', COALESCE(p.discounted_price, p.base_price),
+          -- Best Practice: Backend calculates the final display price
+          'base_price', ROUND(
+              (CASE WHEN p.discounted_price > 0 THEN p.discounted_price ELSE p.base_price END 
+              * (1 + COALESCE(t.tax_percentage, 0) / 100))::numeric, 2
+            ),
           'subcategories', p.subcategories,
           'attributes', p.attributes,
           'status', p.status,
@@ -228,16 +241,23 @@ exports.getProductsForDistributor = async (req, res) => {
           'name', c.name, 
           'slug', c.slug
         ) AS category,
-        
+
+        jsonb_build_object(
+          'id', t.id,
+          'name', t.tax_name,
+          'rate', t.tax_percentage,
+          -- Calculate the exact tax amount for the UI breakup
+          'tax_amount', ROUND((COALESCE(p.discounted_price, p.base_price) * (COALESCE(t.tax_percentage, 0) / 100))::numeric, 2)
+        ) AS tax_data,
+
         COALESCE((
           SELECT jsonb_agg(
             jsonb_build_object('id', sc.id, 'name', sc.name, 'slug', sc.slug)
           )
           FROM categories sc 
           WHERE sc.id = ANY(p.subcategories)
-        ), '[]'::jsonb) AS subcategories,
+        ), '[]'::jsonb) AS subcategories_list,
         
-        -- Product attributes WITH their values for frontend dropdowns
         COALESCE((
           SELECT jsonb_agg(
             jsonb_build_object(
@@ -256,14 +276,14 @@ exports.getProductsForDistributor = async (req, res) => {
           WHERE a.id = ANY(p.attributes)
         ), '[]'::jsonb) AS product_attributes,
         
-        -- ALL variants WITH attr_combinations for frontend matching
         COALESCE((
           SELECT jsonb_agg(
             jsonb_build_object(
               'id', v.id,
               'sku', v.sku,
-              'price', v.price,
+              'base_price', v.price,
               'stock', v.stock,
+              'price', ROUND((COALESCE(v.price) * (1 + COALESCE(t.tax_percentage, 0) / 100))::numeric, 2),
               'bv_point', v.bv_point,
               'attr_combinations', COALESCE((
                 SELECT jsonb_agg(
@@ -288,15 +308,17 @@ exports.getProductsForDistributor = async (req, res) => {
       FROM products p 
       LEFT JOIN categories c ON p.cat_id = c.id
       LEFT JOIN pro_variants v2 ON p.id = v2.product_id
-      
-      GROUP BY p.id, c.id, p.name, p.description, p.f_image, p.g_image, p.tax_id, 
-               p.base_price, p.discounted_price, p.subcategories, p.attributes, 
-               p.status, p.created_at, c.name, c.slug
-      `,
-    );
+      LEFT JOIN tax_settings t ON p.tax_id = t.id
+      ${whereClause}
+      GROUP BY p.id, c.id, t.id, c.name, c.slug, t.tax_percentage, t.tax_name
+    `;
+
+    const result = await db.query(query, values);
+
     res.status(200).json({
       success: true,
       message: "Products fetched successfully",
+      count: result.rowCount,
       data: result.rows,
     });
   } catch (error) {
@@ -304,6 +326,7 @@ exports.getProductsForDistributor = async (req, res) => {
     res.status(500).json({
       success: false,
       message: "Internal server error",
+      error: error.message,
     });
   }
 };
@@ -528,6 +551,17 @@ exports.getProductByslug = async (req, res) => {
           'slug', c.slug
         ) AS category,
         
+        -- Tax Data Population
+        CASE 
+          WHEN p.tax_id IS NOT NULL THEN 
+            jsonb_build_object(
+              'id', t.id,
+              'name', t.tax_name,
+              'percentage', t.tax_percentage
+            )
+          ELSE NULL 
+        END AS tax_data,
+
         COALESCE((
           SELECT jsonb_agg(
             jsonb_build_object('id', sc.id, 'name', sc.name, 'slug', sc.slug)
@@ -587,10 +621,12 @@ exports.getProductByslug = async (req, res) => {
       FROM products p 
       LEFT JOIN categories c ON p.cat_id = c.id
       LEFT JOIN pro_variants v2 ON p.id = v2.product_id
+      LEFT JOIN tax_settings t ON p.tax_id = t.id
       WHERE p.slug = $1 
       GROUP BY p.id, c.id, p.name, p.description, p.f_image, p.g_image, p.tax_id, 
                p.base_price, p.discounted_price, p.subcategories, p.attributes, 
-               p.status, p.created_at, c.name, c.slug
+               p.status, p.created_at, c.name, c.slug,
+               t.id, t.tax_name, t.tax_percentage
     `,
       [slug],
     );

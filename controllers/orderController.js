@@ -19,12 +19,55 @@ exports.placeOrder = async (req, res) => {
       shipping_address,
       coupon_code,
       payment_method = "wallet",
+      order_for = "admin",
     } = req.body;
 
     if (!items || !Array.isArray(items) || items.length === 0) {
       return res
         .status(400)
         .json({ success: false, message: "Items required" });
+    }
+
+    // Determine target distributor for inventory management
+    let targetDistributorId = null;
+
+    // 1. Check explicit distributor_id in request
+    if (req.body.distributor_id) {
+      targetDistributorId = parseInt(req.body.distributor_id);
+    }
+    // 2. Check order_for field
+    else if (order_for && order_for !== "admin") {
+      if (order_for.startsWith("distributor_")) {
+        targetDistributorId = parseInt(order_for.replace("distributor_", ""));
+      } else if (!isNaN(parseInt(order_for))) {
+        targetDistributorId = parseInt(order_for);
+      }
+    }
+
+    // 3. Fallback to user's linked distributor_code
+    if (!targetDistributorId) {
+      const userRes = await client.query(
+        "SELECT distributor_code FROM ecom_user WHERE id = $1",
+        [userId],
+      );
+      const dCode = userRes.rows[0]?.distributor_code;
+      if (dCode) {
+        const dRes = await client.query(
+          "SELECT id FROM users WHERE referral_code = $1 LIMIT 1",
+          [dCode],
+        );
+        if (dRes.rows.length > 0) {
+          targetDistributorId = dRes.rows[0].id;
+        } else if (!isNaN(parseInt(dCode))) {
+          const dRes2 = await client.query(
+            "SELECT id FROM users WHERE id = $1 LIMIT 1",
+            [parseInt(dCode)],
+          );
+          if (dRes2.rows.length > 0) {
+            targetDistributorId = dRes2.rows[0].id;
+          }
+        }
+      }
     }
 
     // 1. Validate items, calculate totals
@@ -34,55 +77,98 @@ exports.placeOrder = async (req, res) => {
 
     for (const item of items) {
       const { product_id, variation_id: variant_id, quantity: qty } = item;
-      const variant = await client.query(
-        `SELECT pv.sku, pv.price, pv.bv_point, pv.stock, p.name as product_name, 
-            p.f_image as product_image,
-          COALESCE((
-            SELECT jsonb_agg(
-              jsonb_build_object(
-                'attr_id', av.attr_id,
-                'attr_value_id', vam.attr_value_id, 
-                'value', av.value
-              ) ORDER BY av.attr_id
-            )
-            FROM variant_attr_mapping vam
-            JOIN attr_values av ON vam.attr_value_id = av.id 
-            WHERE vam.variant_id = pv.id
-          ), '[]'::jsonb) as attributes
-          FROM pro_variants pv 
-          JOIN products p ON pv.product_id = p.id 
-          WHERE pv.id = $1 AND p.status = 'active'`,
-        [variant_id],
-      );
 
-      if (variant.rows.length === 0) {
-        throw new Error(`Invalid variant: ${variant_id}`);
+      let productData;
+
+      if (variant_id) {
+        const variant = await client.query(
+          `SELECT pv.sku, pv.price, pv.bv_point, pv.stock, p.name as product_name, 
+              p.f_image as product_image,
+            COALESCE((
+              SELECT jsonb_agg(
+                jsonb_build_object(
+                  'attr_id', av.attr_id,
+                  'attr_value_id', vam.attr_value_id, 
+                  'value', av.value
+                ) ORDER BY av.attr_id
+              )
+              FROM variant_attr_mapping vam
+              JOIN attr_values av ON vam.attr_value_id = av.id 
+              WHERE vam.variant_id = pv.id
+            ), '[]'::jsonb) as attributes
+            FROM pro_variants pv 
+            JOIN products p ON pv.product_id = p.id 
+            WHERE pv.id = $1 AND p.status = 'active'`,
+          [variant_id],
+        );
+
+        productData = variant.rows[0];
+      } else {
+        // --- CASE 2: Simple Product (No Variation) ---
+        const productRes = await client.query(
+          `SELECT 
+          id::text as sku, -- Fallback to ID if SKU doesn't exist in products table
+          base_price as price, 
+          null as bv_point, 
+          null as stock, 
+          name as product_name, 
+          f_image as product_image, 
+          '[]'::jsonb as attributes
+       FROM products 
+       WHERE id = $1 AND status = 'active'`,
+          [product_id],
+        );
+        productData = productRes.rows[0];
       }
 
-      const v = variant.rows[0];
-      const itemTotal = parseFloat(v.price) * qty;
-      const itemBV = v.bv_point * qty;
+      if (!productData) {
+        throw new Error(
+          `Product or Variant not found/active: ID ${product_id} ${
+            variant_id ? "Var " + variant_id : ""
+          }`,
+        );
+      }
+
+      const itemTotal = parseFloat(productData.price) * qty;
+      const itemBV = (productData.bv_point || 0) * qty;
 
       validatedItems.push({
         product_id,
-        variant_id,
-        product_name: v.product_name,
-        product_image: v.product_image,
-        variant_sku: v.sku,
+        variant_id: variant_id || null,
+        product_name: productData.product_name,
+        product_image: productData.product_image,
+        variant_sku: productData.sku,
         variant_details: {
-          price: v.price,
-          bv_point: v.bv_point,
-          attributes: v.attributes || [],
+          price: productData.price,
+          bv_point: productData.bv_point,
+          attributes: productData.attributes || [],
         },
         qty,
-        unit_price: v.price,
-        unit_bv_points: v.bv_point,
+        unit_price: productData.price,
+        unit_bv_points: productData.bv_point,
         total_item_price: itemTotal,
         total_item_bv: itemBV,
       });
 
       subTotal += itemTotal;
       totalBV += itemBV;
+    }
+
+    // Inventory check for distributor orders
+    if (targetDistributorId) {
+      for (const item of validatedItems) {
+        const invRes = await client.query(
+          `SELECT quantity FROM distributor_inventory
+           WHERE distributor_id = $1 AND product_id = $2 AND COALESCE(variant_id, 0) = COALESCE($3, 0)`,
+          [targetDistributorId, item.product_id, item.variant_id],
+        );
+        const availableQty = invRes.rows[0]?.quantity || 0;
+        if (availableQty < item.qty) {
+          throw new Error(
+            `Insufficient inventory for ${item.product_name}. Available: ${availableQty}, Required: ${item.qty}`,
+          );
+        }
+      }
     }
 
     // 2. Tax (simple 18% GST for now, link to tax_settings later)
@@ -136,11 +222,12 @@ exports.placeOrder = async (req, res) => {
     // 7. Create order
     const orderId = generateOrderId();
     const newOrder = await client.query(
-      `INSERT INTO orders (order_id, user_id, sub_total, tax_amount, shipping_charges, total_amount, total_bv_points, shipping_address, payment_method)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) RETURNING *`,
+      `INSERT INTO orders (order_id, user_id, distributor_id, sub_total, tax_amount, shipping_charges, total_amount, total_bv_points, shipping_address, payment_method, order_for)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11) RETURNING *`,
       [
         orderId,
         userId,
+        targetDistributorId || null,
         subTotal,
         taxAmount,
         shippingCharges,
@@ -148,6 +235,7 @@ exports.placeOrder = async (req, res) => {
         totalBV,
         shipping_address,
         payment_method,
+        order_for,
       ],
     );
 
@@ -173,24 +261,27 @@ exports.placeOrder = async (req, res) => {
       );
     }
 
-    // 9. Log transaction
-    // await client.query(
-    //   `INSERT INTO transactions (user_id, amount, type, category, order_id, remarks, status)
-    //    VALUES ($1, $2, $3, $4, $5, $6, $7)`,
-    //   [
-    //     userId,
-    //     totalAmount,
-    //     "debit",
-    //     "purchase",
-    //     newOrder.rows[0].id,
-    //     `Order ${orderId}`,
-    //     "completed",
-    //   ],
-    // );
+    // 9. Auto-decrease distributor inventory for distributor orders
+    if (targetDistributorId) {
+      for (const item of validatedItems) {
+        const updateRes = await client.query(
+          `UPDATE distributor_inventory
+           SET quantity = quantity - $1, updated_at = CURRENT_TIMESTAMP
+           WHERE distributor_id = $2 AND product_id = $3 AND COALESCE(variant_id, 0) = COALESCE($4, 0)
+           RETURNING *`,
+          [item.qty, targetDistributorId, item.product_id, item.variant_id],
+        );
+        if (updateRes.rowCount === 0) {
+          throw new Error(
+            `Inventory record not found for ${item.product_name}. Cannot fulfill order.`,
+          );
+        }
+      }
+    }
 
     await client.query("COMMIT");
 
-    res.status(201).json({
+    res.status(200).json({
       success: true,
       message: "Order placed successfully",
       data: { ...newOrder.rows[0], items: validatedItems },
@@ -282,38 +373,54 @@ exports.getAllOrders = async (req, res) => {
       whereClause += ` AND o.order_status = $${params.length}`;
     }
 
-    // if (filter && filter !== "distributor") {
-    //   // params.push(status);
-    //   whereClause += ` AND o.payment_method == 'wallet'`;
-    // }
+    if (filter && filter !== "all") {
+      if (filter === "my") {
+        // Show only rows that ARE for a distributor
+        whereClause += ` AND o.order_for LIKE 'distributor_%'`;
+      } else if (filter === "distributor") {
+        // Show rows that ARE NOT for a distributor OR are NULL
+        whereClause += ` AND (o.order_for NOT LIKE 'distributor_%' OR o.order_for IS NULL)`;
+      } else {
+        // Specific ID match
+        params.push(filter);
+        whereClause += ` AND o.order_for = $${params.length}`;
+      }
+    }
 
     // const ordersQuery = `
     //   SELECT
     //     o.*,
-    //     u.name as user_name,
-    //     u.phone as user_phone,
-    //     -- Sabhi items ko ek array mein merge kar rahe hain
+    //     CASE
+    //       WHEN o.user_id IS NOT NULL THEN 'User'
+    //       WHEN o.distributor_id IS NOT NULL THEN 'Distributor'
+    //       ELSE 'Unknown'
+    //     END as user_type,
+    //     -- Pick distributor name if user_name is null, and vice versa
+    //     COALESCE(u.name, d.full_name, d.username) as user_name,
+    //     COALESCE(u.phone, d.phone) as user_phone,
+
     //     COALESCE(
-    //       (SELECT json_agg(items)
-    //        FROM (
-    //          SELECT
-    //            oi.id,
-    //            oi.product_name,
-    //            oi.product_image,
-    //            oi.variant_sku,
-    //            oi.variant_details,
-    //            oi.qty,
-    //            oi.unit_price,
-    //            oi.total_item_price
-    //          FROM order_items oi
-    //          WHERE oi.order_id = o.id
-    //        ) items
+    //       (SELECT json_agg(items)::jsonb
+    //       FROM (
+    //         SELECT
+    //           oi.id,
+    //           oi.product_name,
+    //           oi.product_image,
+    //           oi.variant_sku,
+    //           oi.variant_details,
+    //           oi.qty,
+    //           oi.unit_price,
+    //           oi.total_item_price
+    //         FROM order_items oi
+    //         WHERE oi.order_id = o.id
+    //       ) items
     //       ), '[]'::jsonb
     //     ) as products,
-    //     -- Total items count calculate karne ke liye
     //     (SELECT COUNT(*)::int FROM order_items WHERE order_id = o.id) as item_count
     //   FROM orders o
-    //   JOIN ecom_user u ON o.user_id = u.id
+    //   -- Use LEFT JOIN because an order might not have one of these
+    //   LEFT JOIN ecom_user u ON o.user_id = u.id
+    //   LEFT JOIN users d ON o.distributor_id = d.id
     //   ${whereClause}
     //   ORDER BY o.created_at DESC
     //   LIMIT $${params.length + 1} OFFSET $${params.length + 2}
@@ -321,41 +428,34 @@ exports.getAllOrders = async (req, res) => {
 
     const ordersQuery = `
       SELECT 
-  o.*, 
-  CASE 
-    WHEN o.user_id IS NOT NULL THEN 'User'
-    WHEN o.distributor_id IS NOT NULL THEN 'Distributor'
-    ELSE 'Unknown'
-  END as user_type,
-  -- Pick distributor name if user_name is null, and vice versa
-  COALESCE(u.name, d.full_name, d.username) as user_name, 
-  COALESCE(u.phone, d.phone) as user_phone,
-  
-  COALESCE(
-    (SELECT json_agg(items)::jsonb 
-     FROM (
-       SELECT 
-         oi.id, 
-         oi.product_name, 
-         oi.product_image, 
-         oi.variant_sku, 
-         oi.variant_details, 
-         oi.qty, 
-         oi.unit_price,
-         oi.total_item_price
-       FROM order_items oi 
-       WHERE oi.order_id = o.id
-     ) items
-    ), '[]'::jsonb
-  ) as products,
-  (SELECT COUNT(*)::int FROM order_items WHERE order_id = o.id) as item_count
-FROM orders o 
--- Use LEFT JOIN because an order might not have one of these
-LEFT JOIN ecom_user u ON o.user_id = u.id
-LEFT JOIN users d ON o.distributor_id = d.id 
-${whereClause}
-ORDER BY o.created_at DESC 
-LIMIT $${params.length + 1} OFFSET $${params.length + 2}
+        o.*, 
+        CASE 
+          WHEN o.user_id IS NOT NULL THEN 'User'
+          WHEN o.distributor_id IS NOT NULL THEN 'Distributor'
+          ELSE 'Unknown'
+        END as user_type,
+        -- Priority: ecom_user name > distributor full_name > distributor username
+        COALESCE(u.name, d.full_name, d.username) as user_name, 
+        COALESCE(u.phone, d.phone) as user_phone,
+        COALESCE(
+          (SELECT json_agg(items)::jsonb 
+           FROM (
+             SELECT 
+               oi.id, oi.product_name, oi.product_image, 
+               oi.variant_sku, oi.variant_details, 
+               oi.qty, oi.unit_price, oi.total_item_price
+             FROM order_items oi 
+             WHERE oi.order_id = o.id
+           ) items
+          ), '[]'::jsonb
+        ) as products,
+        (SELECT COUNT(*)::int FROM order_items WHERE order_id = o.id) as item_count
+      FROM orders o 
+      LEFT JOIN ecom_user u ON o.user_id = u.id
+      LEFT JOIN users d ON o.distributor_id = d.id 
+      ${whereClause}
+      ORDER BY o.created_at DESC 
+      LIMIT $${params.length + 1} OFFSET $${params.length + 2}
     `;
 
     const orders = await db.query(ordersQuery, [
@@ -371,13 +471,14 @@ LIMIT $${params.length + 1} OFFSET $${params.length + 2}
 
     res.json({
       success: true,
-      data: orders.rows,
+      clause: ordersQuery,
       pagination: {
         page: parseInt(page),
         limit: parseInt(limit),
         total: totalRes.rows[0].count,
         pages: Math.ceil(totalRes.rows[0].count / parseInt(limit)),
       },
+      data: orders.rows,
     });
   } catch (error) {
     console.error("Error in getAllOrders:", error);
@@ -448,36 +549,58 @@ LIMIT $${params.length + 1} OFFSET $${params.length + 2}
 exports.getOrderDetail = async (req, res) => {
   try {
     const { id } = req.params;
-    const order = await db.query(
-      `
-      SELECT o.*, u.name, u.phone,
-             json_agg(json_build_object(
-               'product_name', oi.product_name,
-               'product_image', oi.product_image,
-               'variant_sku', oi.variant_sku,
-               'variant_details', oi.variant_details,
-               'qty', oi.qty,
-               'unit_price', oi.unit_price,
-               'total_item_price', oi.total_item_price
-             )) as items
-      FROM orders o 
-      JOIN ecom_user u ON o.user_id = u.id
-      LEFT JOIN order_items oi ON o.id = oi.order_id
-      WHERE o.order_id = $1 
-      GROUP BY o.id, u.id, u.phone
-    `,
-      [id],
-    );
+
+    const query = `
+       SELECT 
+    o.id, 
+    o.*, 
+    CASE 
+        WHEN o.user_id IS NOT NULL THEN 'User'
+        WHEN o.distributor_id IS NOT NULL THEN 'Distributor'
+        ELSE 'Unknown'
+    END as user_type,
+    COALESCE(u.name, d.full_name, d.username) as user_name, 
+    COALESCE(u.phone, d.phone) as user_phone,
+    json_agg(
+        json_build_object(
+            'id', oi.id,
+            'product_name', oi.product_name, 
+            'product_image', oi.product_image, 
+            'variant_sku', oi.variant_sku, 
+            'variant_details', oi.variant_details, 
+            'qty', oi.qty, 
+            'price', oi.unit_price, 
+            -- Extracting tax percentage from JSON and calculating
+            'tax_amount', ROUND(
+                (oi.unit_price * COALESCE((oi.variant_details->'tax_data'->>'percentage')::numeric, 0) / 100)::numeric, 
+                2
+            ),
+            'unit_price', ROUND(
+                (oi.unit_price * (1 + COALESCE((oi.variant_details->'tax_data'->>'percentage')::numeric, 0) / 100))::numeric, 
+                2
+            ),
+            'total_item_price', oi.total_item_price
+        )
+    ) FILTER (WHERE oi.id IS NOT NULL) as items 
+FROM orders o 
+LEFT JOIN ecom_user u ON o.user_id = u.id 
+LEFT JOIN users d ON o.distributor_id = d.id 
+LEFT JOIN order_items oi ON o.id = oi.order_id 
+WHERE o.order_id = $1
+GROUP BY o.id, u.id, d.id;
+    `;
+
+    const order = await db.query(query, [id]);
 
     if (order.rows.length === 0) {
       return res
         .status(404)
-        .json({ success: false, message: "Order not found" });
+        .json({ success: false, query, message: "Order not found" });
     }
 
     res.json({ success: true, data: order.rows[0] });
   } catch (error) {
-    // console.error(error.message);
+    console.error(error);
     res.status(500).json({ success: false, message: "Server error" });
   }
 };

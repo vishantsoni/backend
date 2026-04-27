@@ -4,18 +4,30 @@ const db = require("../config/db");
 exports.getBalance = async (req, res) => {
   try {
     const userId = req.user.id;
-    const wallet = await db.query(
-      `
-      SELECT 
-    COALESCE(w.total_amount, 0) as total_balance,
-    COALESCE(w.pending_amount, 0) as pending_balance,
-    (COALESCE(w.total_amount, 0) + COALESCE(w.pending_amount, 0)) as available_balance,
+    const query = `
+    SELECT 
+    COALESCE(w.total_amount, 0) as total_balance_rs,
+    COALESCE(w.pending_amount, 0) as pending_balance_rs,
+    -- Amount to UV Conversion (Amount / 10)
+    (COALESCE(w.total_amount, 0) / 10.0) as total_balance,
+    (COALESCE(w.pending_amount, 0) / 10.0) as pending_balance,
+    -- Available Balance in UV
+    ((COALESCE(w.total_amount, 0) + COALESCE(w.pending_amount, 0)) / 10.0) as available_balance,
     (SELECT COUNT(*) FROM transactions WHERE user_id = $1) as total_transactions
 FROM wallets w
-WHERE w.user_id = $1;
-    `,
-      [userId],
-    );
+WHERE w.user_id = $1;`;
+
+    const old_query = `
+SELECT 
+      COALESCE(w.total_amount, 0) as total_balance,
+      COALESCE(w.pending_amount, 0) as pending_balance,
+      (COALESCE(w.total_amount, 0) + COALESCE(w.pending_amount, 0)) as available_balance,
+      (SELECT COUNT(*) FROM transactions WHERE user_id = $1) as total_transactions
+      FROM wallets w
+      WHERE w.user_id = $1;
+`;
+
+    const wallet = await db.query(query, [userId]);
 
     res.json({
       success: true,
@@ -39,15 +51,29 @@ exports.getHistory = async (req, res) => {
     const { page = 1, limit = 20, type, category } = req.query;
     const offset = (page - 1) * limit;
 
+    // let query = `
+    //   SELECT
+    //     t.id, t.amount, t.type, t.category, t.status, t.remarks, t.created_at,
+    //     u.username as other_user,
+    //     o.order_id
+    //   FROM transactions t
+    //   LEFT JOIN users u ON t.source_user_id = u.id OR (t.user_id != $1 AND t.source_user_id = $1)
+    //   LEFT JOIN orders o ON t.order_id = o.id
+    //   WHERE t.user_id = $1
+    // `;
+
     let query = `
       SELECT 
-        t.id, t.amount, t.type, t.category, t.status, t.remarks, t.created_at,
+        t.id, t.amount as amount_rs,
+        (t.amount / NULLIF((s.setting_value->>'uv_value')::numeric, 0)) as amount,
+         t.type, t.category, t.status, t.remarks, t.created_at,
         u.username as other_user,
         o.order_id
       FROM transactions t
+      CROSS JOIN app_settings s
       LEFT JOIN users u ON t.source_user_id = u.id OR (t.user_id != $1 AND t.source_user_id = $1)
       LEFT JOIN orders o ON t.order_id = o.id
-      WHERE t.user_id = $1
+      WHERE t.user_id = $1 AND s.setting_key = 'point_system'
     `;
     const params = [userId];
 
@@ -58,7 +84,9 @@ exports.getHistory = async (req, res) => {
       query += " AND t.category = $" + params.push(category);
     }
 
-    query += ` ORDER BY t.created_at DESC LIMIT $${params.length + 1} OFFSET $${params.length + 2}`;
+    query += ` ORDER BY t.created_at DESC LIMIT $${params.length + 1} OFFSET $${
+      params.length + 2
+    }`;
     params.push(parseInt(limit), offset);
 
     const transactions = await db.query(query, params);
