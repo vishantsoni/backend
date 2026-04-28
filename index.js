@@ -47,6 +47,7 @@ app.use("/api/notifications", require("./routes/notificationRoutes"));
 app.use("/api/inventory", require("./routes/inventoryRoutes"));
 app.use("/api/reports", require("./routes/reportRoute"));
 app.use("/api/dashboard", require("./routes/dashboardRoutes"));
+app.use("/api/milestones", require("./routes/milestoneRoutes"));
 app.post("/api/upload", async (req, res) => {
   try {
     // 1. चेक करें कि फाइल्स आई हैं या नहीं

@@ -283,3 +283,15 @@ ON distributor_inventory (distributor_id, product_id, COALESCE(variant_id, 0));
 
 CREATE INDEX IF NOT EXISTS idx_distributor_inventory_distributor_id ON distributor_inventory(distributor_id);
 CREATE INDEX IF NOT EXISTS idx_distributor_inventory_product_id ON distributor_inventory(product_id);
+
+-- Milestones Table
+CREATE TABLE IF NOT EXISTS milestones (
+    id SERIAL PRIMARY KEY,
+    level_id INTEGER NOT NULL,
+    milestone_name VARCHAR(100) NOT NULL,
+    tour_details TEXT,
+    reward_cash DECIMAL(12, 2) DEFAULT 0.00,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_milestones_level_id ON milestones(level_id);

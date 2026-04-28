@@ -335,3 +335,251 @@ exports.getPurchaseReport = async (req, res) => {
     res.status(500).json({ success: false, message: "Server error" });
   }
 };
+
+// @desc    Get GST Report
+// @route   GET /api/reports/gst
+exports.getGSTReport = async (req, res) => {
+  try {
+    const { from, to } = req.query;
+    const { clause: dateClause, params: dateParams } = buildDateRange(
+      from,
+      to,
+      "o",
+    );
+
+    // 1. Overall GST Summary
+    const summaryQuery = `
+      SELECT
+        COUNT(*)::int as total_orders,
+        COALESCE(SUM(o.sub_total), 0)::numeric(12,2) as total_taxable_value,
+        COALESCE(SUM(o.tax_amount), 0)::numeric(12,2) as total_gst_collected,
+        COALESCE(SUM(o.total_amount), 0)::numeric(12,2) as total_amount,
+        COALESCE(AVG(o.tax_amount), 0)::numeric(12,2) as avg_gst_per_order
+      FROM orders o
+      WHERE o.payment_status = 'paid'
+      ${dateClause}
+    `;
+    const summaryResult = await db.query(summaryQuery, [...dateParams]);
+
+    // 2. GST by Tax Slab (from product tax_settings)
+    const taxSlabQuery = `
+      SELECT
+        COALESCE(ts.tax_percentage, 0)::numeric(5,2) as tax_rate,
+        COUNT(DISTINCT o.id)::int as total_orders,
+        COALESCE(SUM(oi.total_item_price), 0)::numeric(12,2) as taxable_value,
+        COALESCE(SUM(oi.total_item_price * COALESCE(ts.tax_percentage, 0) / 100), 0)::numeric(12,2) as gst_amount
+      FROM orders o
+      JOIN order_items oi ON o.id = oi.order_id
+      LEFT JOIN products p ON oi.product_id = p.id
+      LEFT JOIN tax_settings ts ON p.tax_id = ts.id
+      WHERE o.payment_status = 'paid'
+      ${dateClause}
+      GROUP BY ts.tax_percentage
+      ORDER BY tax_rate DESC
+    `;
+    const taxSlabResult = await db.query(taxSlabQuery, [...dateParams]);
+
+    // 3. Monthly GST Trend
+    const monthlyTrendQuery = `
+      SELECT
+        DATE_TRUNC('month', o.created_at) as month,
+        COUNT(*)::int as orders,
+        COALESCE(SUM(o.sub_total), 0)::numeric(12,2) as taxable_value,
+        COALESCE(SUM(o.tax_amount), 0)::numeric(12,2) as gst_collected,
+        COALESCE(SUM(o.total_amount), 0)::numeric(12,2) as total_amount
+      FROM orders o
+      WHERE o.payment_status = 'paid'
+      ${dateClause}
+      GROUP BY DATE_TRUNC('month', o.created_at)
+      ORDER BY month DESC
+      LIMIT 12
+    `;
+    const monthlyTrendResult = await db.query(monthlyTrendQuery, [
+      ...dateParams,
+    ]);
+
+    // 4. GST by Order (Top orders with highest GST)
+    const topOrdersQuery = `
+      SELECT
+        o.order_id,
+        o.created_at,
+        COALESCE(u.name, d.full_name, d.username) as customer_name,
+        o.sub_total::numeric(12,2) as taxable_value,
+        o.tax_amount::numeric(12,2) as gst_amount,
+        o.total_amount::numeric(12,2) as total_amount,
+        CASE
+          WHEN o.order_for LIKE 'distributor_%' THEN 'B2B'
+          ELSE 'B2C'
+        END as order_type
+      FROM orders o
+      LEFT JOIN ecom_user u ON o.user_id = u.id
+      LEFT JOIN users d ON o.distributor_id = d.id
+      WHERE o.payment_status = 'paid'
+      ${dateClause}
+      ORDER BY o.tax_amount DESC
+      LIMIT 20
+    `;
+    const topOrdersResult = await db.query(topOrdersQuery, [...dateParams]);
+
+    // 5. GST by Product
+    const byProductQuery = `
+      SELECT
+        oi.product_id,
+        oi.product_name,
+        COALESCE(SUM(oi.qty), 0)::int as total_qty_sold,
+        COALESCE(SUM(oi.total_item_price), 0)::numeric(12,2) as taxable_value,
+        COALESCE(SUM(oi.total_item_price * COALESCE(ts.tax_percentage, 0) / 100), 0)::numeric(12,2) as gst_amount
+      FROM orders o
+      JOIN order_items oi ON o.id = oi.order_id
+      LEFT JOIN products p ON oi.product_id = p.id
+      LEFT JOIN tax_settings ts ON p.tax_id = ts.id
+      WHERE o.payment_status = 'paid'
+      ${dateClause}
+      GROUP BY oi.product_id, oi.product_name
+      ORDER BY gst_amount DESC
+      LIMIT 20
+    `;
+    const byProductResult = await db.query(byProductQuery, [...dateParams]);
+
+    // 6. B2B vs B2C Breakdown
+    const b2bB2cQuery = `
+      SELECT
+        CASE
+          WHEN o.order_for LIKE 'distributor_%' THEN 'B2B'
+          ELSE 'B2C'
+        END as order_type,
+        COUNT(*)::int as total_orders,
+        COALESCE(SUM(o.sub_total), 0)::numeric(12,2) as taxable_value,
+        COALESCE(SUM(o.tax_amount), 0)::numeric(12,2) as gst_amount,
+        COALESCE(SUM(o.total_amount), 0)::numeric(12,2) as total_amount
+      FROM orders o
+      WHERE o.payment_status = 'paid'
+      ${dateClause}
+      GROUP BY
+        CASE
+          WHEN o.order_for LIKE 'distributor_%' THEN 'B2B'
+          ELSE 'B2C'
+        END
+      ORDER BY gst_amount DESC
+    `;
+    const b2bB2cResult = await db.query(b2bB2cQuery, [...dateParams]);
+
+    // 7. CGST / SGST / IGST Split
+    // Current schema stores flat tax_amount. Assuming intrastate (CGST+SGST) by default.
+    // When explicit interstate flag is added, IGST logic can be updated.
+    const gstSplitQuery = `
+      SELECT
+        COALESCE(SUM(o.tax_amount), 0)::numeric(12,2) as total_gst,
+        COALESCE(SUM(o.tax_amount / 2), 0)::numeric(12,2) as cgst,
+        COALESCE(SUM(o.tax_amount / 2), 0)::numeric(12,2) as sgst,
+        0::numeric(12,2) as igst
+      FROM orders o
+      WHERE o.payment_status = 'paid'
+      ${dateClause}
+    `;
+    const gstSplitResult = await db.query(gstSplitQuery, [...dateParams]);
+
+    return res.json({
+      success: true,
+      data: {
+        summary: summaryResult.rows[0],
+        tax_slabs: taxSlabResult.rows,
+        monthly_trend: monthlyTrendResult.rows,
+        top_orders: topOrdersResult.rows,
+        by_product: byProductResult.rows,
+        b2b_b2c_breakdown: b2bB2cResult.rows,
+        gst_split: gstSplitResult.rows[0],
+      },
+      message: "GST report fetched successfully",
+    });
+  } catch (error) {
+    console.error("Error fetching GST report:", error);
+    res.status(500).json({ success: false, message: "Server error" });
+  }
+};
+
+const ExcelJS = require("exceljs");
+
+exports.exportGSTReportExcel = async (req, res) => {
+  try {
+    const { from, to } = req.query;
+    const { clause: dateClause, params: dateParams } = buildDateRange(
+      from,
+      to,
+      "o",
+    );
+
+    // 1. डेटा फेच करें (सिर्फ मुख्य डेटा ले रहे हैं एक्सेल के लिए)
+    const reportQuery = `
+      SELECT
+        o.order_id,
+        o.created_at,
+        COALESCE(u.name, d.full_name, d.username) as customer_name,
+        CASE WHEN o.order_for LIKE 'distributor_%' THEN 'B2B' ELSE 'B2C' END as type,
+        o.sub_total::numeric(12,2) as taxable_value,
+        o.tax_amount::numeric(12,2) as gst_amount,
+        (o.tax_amount / 2)::numeric(12,2) as cgst,
+        (o.tax_amount / 2)::numeric(12,2) as sgst,
+        o.total_amount::numeric(12,2) as total
+      FROM orders o
+      LEFT JOIN ecom_user u ON o.user_id = u.id
+      LEFT JOIN users d ON o.distributor_id = d.id
+      WHERE o.payment_status = 'paid'
+      ${dateClause}
+      ORDER BY o.created_at DESC
+    `;
+    const result = await db.query(reportQuery, [...dateParams]);
+
+    // 2. Excel Workbook और Worksheet बनाएं
+    const workbook = new ExcelJS.Workbook();
+    const worksheet = workbook.addWorksheet("GST Sales Report");
+
+    // 3. Columns सेट करें
+    worksheet.columns = [
+      { header: "Order ID", key: "order_id", width: 20 },
+      { header: "Date", key: "created_at", width: 15 },
+      { header: "Customer", key: "customer_name", width: 25 },
+      { header: "Type", key: "type", width: 10 },
+      { header: "Taxable Value (₹)", key: "taxable_value", width: 15 },
+      { header: "CGST (₹)", key: "cgst", width: 12 },
+      { header: "SGST (₹)", key: "sgst", width: 12 },
+      { header: "Total GST (₹)", key: "gst_amount", width: 15 },
+      { header: "Grand Total (₹)", key: "total", width: 15 },
+    ];
+
+    // 4. Header को बोल्ड और कलर्ड बनाएं (Ganesh Tech Theme)
+    worksheet.getRow(1).eachCell((cell) => {
+      cell.font = { bold: true, color: { argb: "FFFFFF" } };
+      cell.fill = {
+        type: "pattern",
+        pattern: "solid",
+        fgColor: { argb: "E91E63" }, // आपकी थीम का पिंक/मजेंटा कलर
+      };
+    });
+
+    // 5. डेटा रोज़ जोड़ें
+    result.rows.forEach((row) => {
+      worksheet.addRow({
+        ...row,
+        created_at: new Date(row.created_at).toLocaleDateString(),
+      });
+    });
+
+    // 6. Response Headers सेट करें
+    res.setHeader(
+      "Content-Type",
+      "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    );
+    res.setHeader(
+      "Content-Disposition",
+      `attachment; filename=GST_Report.xlsx`,
+    );
+
+    // 7. फाइल भेजें
+    await workbook.xlsx.write(res);
+    return res.end();
+  } catch (error) {
+    console.error("Excel Export Error:", error);
+    res.status(500).json({ success: false, message: "Export failed" });
+  }
+};
