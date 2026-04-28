@@ -73,8 +73,8 @@ router.get("/products", getProducts);
 router.get("/getDproducts", getProductsForDistributor);
 
 router.post("/category/create", [authMiddleware, isSuperAdmin], createCategory);
-router.put("/category/update", isSuperAdmin, updateCategory);
-router.delete("/category/:id", isSuperAdmin, deleteCategory);
+router.put("/category/update", [authMiddleware, isSuperAdmin], updateCategory);
+router.delete("/category/:id", [authMiddleware, isSuperAdmin], deleteCategory);
 
 // Attributes CRUD
 router.get("/attributes", getAllAttributes);

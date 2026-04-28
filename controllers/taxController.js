@@ -130,6 +130,18 @@ exports.createTax = async (req, res) => {
       });
     }
 
+    const already = await db.query(
+      `select * from tax_settings where tax_percentage = $1`,
+      [parsedTaxPercentage],
+    );
+
+    if (already.rows.length > 0) {
+      return res.status(202).json({
+        success: false,
+        message: "This tax is already exists.",
+      });
+    }
+
     const parsedInclusive =
       typeof is_inclusive === "boolean"
         ? is_inclusive
