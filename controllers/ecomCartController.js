@@ -29,12 +29,13 @@ exports.getCart = async (req, res) => {
 
     const items = await db.query(
       `SELECT 
-    ci.*, 
-    p.name AS product_name, 
-    p.slug, 
-    p.f_image,
-    p.base_price AS price,
-    -- Tax Data Population
+        ci.*, 
+        p.name AS product_name, 
+        p.slug, 
+        p.f_image,
+        -- Correct Price: If variation exists use pv.price, else p.base_price
+        COALESCE(pv.price, p.base_price) AS unit_price,
+        -- Tax Data
         CASE 
           WHEN p.tax_id IS NOT NULL THEN 
             jsonb_build_object(
@@ -44,32 +45,32 @@ exports.getCart = async (req, res) => {
             )
           ELSE NULL 
         END AS tax_data,
-    -- Variant data ko JSON format mein generate karein
-    CASE 
-        WHEN ci.variation_id IS NULL THEN NULL
-        ELSE json_build_object(
+        -- Variant Details
+        CASE 
+          WHEN ci.variation_id IS NULL THEN NULL
+          ELSE json_build_object(
             'id', pv.id,
             'price', pv.price,
             'stock', pv.stock,
             'attributes', (
-                SELECT json_agg(json_build_object(
-                    'attribute_name', a.name,
-                    'value', av.value
-                ))
-                FROM variant_attr_mapping vam
-                JOIN attr_values av ON vam.attr_value_id = av.id
-                JOIN attributes a ON av.attr_id = a.id
-                WHERE vam.variant_id = ci.variation_id
+              SELECT json_agg(json_build_object(
+                'attribute_name', a.name,
+                'attribute_val', av.value
+              ))
+              FROM variant_attr_mapping vam
+              JOIN attr_values av ON vam.attr_value_id = av.id
+              JOIN attributes a ON av.attr_id = a.id
+              WHERE vam.variant_id = ci.variation_id
             )
-        )
-    END AS variant_details,
-    (ci.variation_id IS NULL) AS is_variation_null
-    FROM e_cart_items ci
-    LEFT JOIN products p ON ci.product_id = p.id
-    LEFT JOIN pro_variants pv ON ci.variation_id = pv.id
-    LEFT JOIN tax_settings t ON t.id = p.tax_id
-    WHERE ci.cart_id = $1
-    ORDER BY ci.created_at DESC;`,
+          )
+        END AS variant_details,
+        (ci.variation_id IS NULL) AS is_variation_null
+      FROM e_cart_items ci
+      LEFT JOIN products p ON ci.product_id = p.id
+      LEFT JOIN pro_variants pv ON ci.variation_id = pv.id
+      LEFT JOIN tax_settings t ON t.id = p.tax_id
+      WHERE ci.cart_id = $1
+      ORDER BY ci.created_at DESC;`,
       [cartId],
     );
 
@@ -77,42 +78,33 @@ exports.getCart = async (req, res) => {
     let subtotal = 0;
     let totalTaxAmount = 0;
 
-    // const totalItems = items.rows.reduce((sum, item) => sum + item.quantity, 0);
-    // const total = items.rows.reduce(
-    //   (sum, item) => sum + item.quantity * parseFloat(item.price),
-    //   0,
-    // );
-
     items.rows.forEach((item) => {
       const qty = parseInt(item.quantity);
-      const price = parseFloat(item.price);
+      const unitPrice = parseFloat(item.unit_price);
       const taxPercent = item.tax_data
         ? parseFloat(item.tax_data.percentage)
         : 0;
 
-      const itemSubtotal = qty * price;
+      // Single item calculations
+      const taxPerUnit = unitPrice * (taxPercent / 100);
+      const taxablePrice = unitPrice + taxPerUnit; // Single unit price including tax
+
+      // Line item calculations
+      const itemSubtotal = qty * unitPrice;
       const itemTax = itemSubtotal * (taxPercent / 100);
 
       totalItems += qty;
       subtotal += itemSubtotal;
       totalTaxAmount += itemTax;
 
-      // Store calculated values back in the item object for frontend display
-      item.item_subtotal = parseFloat(itemSubtotal.toFixed(2));
-      item.item_tax = parseFloat(itemTax.toFixed(2));
+      // Add new indexes to the item object for frontend
+      item.taxable_price = parseFloat(taxablePrice.toFixed(2)); // Unit price + Tax
+      item.item_subtotal = parseFloat(itemSubtotal.toFixed(2)); // Total for this row (Excl. Tax)
+      item.item_tax = parseFloat(itemTax.toFixed(2)); // Total tax for this row
     });
 
     const grandTotal = subtotal + totalTaxAmount;
 
-    // res.json({
-    //   status: true,
-    //   cart: {
-    //     id: cartId,
-    //     items: items.rows,
-    //     total_items: totalItems,
-    //     total: parseFloat(total.toFixed(2)),
-    //   },
-    // });
     res.json({
       status: true,
       cart: {
