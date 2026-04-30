@@ -288,6 +288,36 @@ const generateUsername = async (client) => {
   throw new Error("Failed to generate username");
 };
 
+const QRCode = require("qrcode");
+
+const generateQrcode = async (referral_code) => {
+  const registrationLink = `https://admin-mlm.vercel.app/signup?ref=${referral_code}`;
+
+  // Folder path define karein
+
+  const uploadDir = pathModule.join("uploads", "qrcodes");
+  await fs.mkdir(uploadDir, { recursive: true });
+
+  const safeFileName = `${referral_code}.png`;
+  const filePath = pathModule.join(uploadDir, safeFileName);
+
+  try {
+    // 2. Ab QR code generate karke file system mein save karein
+    await QRCode.toFile(filePath, registrationLink, {
+      color: {
+        dark: "#000000", // Black dots
+        light: "#FFFFFF", // White background
+      },
+      width: 500,
+    });
+
+    return filePath;
+  } catch (err) {
+    console.error("QR generation error details:", err);
+    throw new Error(`Qr code generate error - ${err.message}`);
+  }
+};
+
 exports.createUser = async (req, res) => {
   const client = await db.connect();
 
@@ -499,6 +529,8 @@ exports.createUser = async (req, res) => {
       "INSERT INTO wallets (user_id, total_amount, left_count, right_count, paid_pairs) VALUES ($1, 0, 0, 0, 0)",
       [newUser.rows[0].id],
     );
+
+    await generateQrcode(finalReferralCode);
 
     await client.query("COMMIT");
 

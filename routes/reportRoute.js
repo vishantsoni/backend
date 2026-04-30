@@ -21,7 +21,7 @@ router.get("/profit-loss", authMiddleware, isSuperAdmin, getProfitLossReport);
 router.get("/purchase", authMiddleware, isAdmin, getPurchaseReport);
 
 // @route   GET api/reports/gst
-router.get("/gst", authMiddleware, isSuperAdmin, getGSTReport);
+router.get("/gst", authMiddleware, getGSTReport);
 router.get("/gst-excel", exportGSTReportExcel);
 
 module.exports = router;

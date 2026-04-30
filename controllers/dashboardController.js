@@ -11,6 +11,227 @@ const safeQuery = async (query, params = [], defaultValue = null) => {
   }
 };
 
+// @desc    Get User/Distributor Dashboard Data
+// @route   GET /api/dashboard/me
+exports.getUserDashboardData = async (req, res) => {
+  try {
+    const userId = req.user.id;
+
+    // ─── 1. USER PROFILE ───
+    const userProfile = await safeQuery(
+      `
+      SELECT 
+        id, full_name, username, phone, email, 
+        referral_code, binary_path, nlevel(binary_path) as level,
+        is_active, kyc_status, created_at
+      FROM users
+      WHERE id = $1
+      `,
+      [userId],
+      null,
+    );
+
+    // ─── 2. WALLET BALANCE ───
+    const walletBalance = await safeQuery(
+      `
+      SELECT 
+        COALESCE(total_amount, 0)::numeric(15,2) as total_balance,
+        COALESCE(pending_amount, 0)::numeric(15,2) as pending_balance,
+        (COALESCE(total_amount, 0) + COALESCE(pending_amount, 0))::numeric(15,2) as available_balance
+      FROM wallets
+      WHERE user_id = $1
+      `,
+      [userId],
+      {},
+    );
+
+    // ─── 3. PERSONAL ORDER STATISTICS ───
+    const orderStats = await safeQuery(
+      `
+      SELECT
+        COUNT(*)::int as total_orders,
+        COALESCE(SUM(total_amount), 0)::numeric(12,2) as total_spent,
+        COALESCE(AVG(total_amount), 0)::numeric(12,2) as avg_order_value,
+        COUNT(*) FILTER (WHERE order_status = 'pending')::int as pending_orders,
+        COUNT(*) FILTER (WHERE order_status = 'delivered')::int as delivered_orders,
+        COUNT(*) FILTER (WHERE order_status = 'cancelled')::int as cancelled_orders,
+        COUNT(*) FILTER (WHERE payment_status = 'paid')::int as paid_orders,
+        COUNT(*) FILTER (WHERE payment_status = 'unpaid')::int as unpaid_orders
+      FROM orders
+      WHERE distributor_id = $1
+      `,
+      [userId],
+      {},
+    );
+
+    // ─── 4. PACKAGE PURCHASES ───
+    // const packageStats = await safeQuery(
+    //   `
+    //   SELECT
+    //     COUNT(*)::int as total_packages,
+    //     COALESCE(SUM(amount), 0)::numeric(12,2) as total_invested
+    //   FROM user_packages
+    //   WHERE user_id = $1 AND status = 'activated'
+    //   `,
+    //   [userId],
+    //   {},
+    // );
+
+    // ─── 5. TRANSACTION STATISTICS ───
+    const transactionStats = await safeQuery(
+      `
+      SELECT
+        COALESCE(SUM(amount) FILTER (WHERE category = 'commission' AND type = 'credit'), 0)::numeric(15,2) as total_commissions,
+        COALESCE(SUM(amount) FILTER (WHERE category = 'withdraw' AND type = 'debit'), 0)::numeric(15,2) as total_withdrawals,
+        COALESCE(SUM(amount) FILTER (WHERE category = 'purchase' AND type = 'debit'), 0)::numeric(15,2) as total_purchases,
+        COALESCE(SUM(amount) FILTER (WHERE category = 'ref_bonus' AND type = 'credit'), 0)::numeric(15,2) as total_ref_bonuses,
+        COUNT(*) FILTER (WHERE type = 'credit')::int as total_credits,
+        COUNT(*) FILTER (WHERE type = 'debit')::int as total_debits
+      FROM transactions
+      WHERE user_id = $1
+      `,
+      [userId],
+      {},
+    );
+
+    // ─── 6. TEAM / DOWNLINE MEMBERS ───
+    const teamStats = await safeQuery(
+      `
+      SELECT 
+        COUNT(*)::int as total_team_members,
+        COUNT(*) FILTER (WHERE nlevel(binary_path) = 2)::int as direct_referrals,
+        COUNT(*) FILTER (WHERE nlevel(binary_path) > 2)::int as downline_members
+      FROM users
+      WHERE binary_path @> (SELECT binary_path FROM users WHERE id = $1)
+        AND id != $1
+      `,
+      [userId],
+      {},
+    );
+
+    // ─── 7. RECENT ORDERS ───
+    const recentOrders = await safeQuery(
+      `
+      SELECT 
+        id, order_id, total_amount, order_status, payment_status, created_at
+      FROM orders
+      WHERE distributor_id = $1
+      ORDER BY created_at DESC
+      LIMIT 5
+      `,
+      [userId],
+      [],
+    );
+
+    // ─── 8. RECENT TRANSACTIONS ───
+    const recentTransactions = await safeQuery(
+      `
+      SELECT 
+        id, amount, type, category, status, remarks, created_at
+      FROM transactions
+      WHERE user_id = $1
+      ORDER BY created_at DESC
+      LIMIT 5
+      `,
+      [userId],
+      [],
+    );
+
+    // ─── 9. CHART DATA - DAILY ORDERS (LAST 7 DAYS) ───
+    const dailyOrders = await safeQuery(
+      `
+      SELECT 
+        DATE(created_at) as date,
+        COUNT(*)::int as orders,
+        COALESCE(SUM(total_amount), 0)::numeric(12,2) as spending
+      FROM orders
+      WHERE distributor_id = $1 AND created_at >= CURRENT_DATE - INTERVAL '6 days'
+      GROUP BY DATE(created_at)
+      ORDER BY date ASC
+      `,
+      [userId],
+      [],
+    );
+
+    // ─── 10. CHART DATA - DAILY TRANSACTIONS (LAST 7 DAYS) ───
+    const dailyTransactions = await safeQuery(
+      `
+      SELECT 
+        DATE(created_at) as date,
+        COALESCE(SUM(amount) FILTER (WHERE type = 'credit'), 0)::numeric(15,2) as credits,
+        COALESCE(SUM(amount) FILTER (WHERE type = 'debit'), 0)::numeric(15,2) as debits
+      FROM transactions
+      WHERE user_id = $1 AND created_at >= CURRENT_DATE - INTERVAL '6 days'
+      GROUP BY DATE(created_at)
+      ORDER BY date ASC
+      `,
+      [userId],
+      [],
+    );
+
+    // ─── COMBINE ALL DATA ───
+    return res.json({
+      success: true,
+      data: {
+        profile: userProfile.data?.[0] || {},
+        wallet: walletBalance.data?.[0] || {},
+        orders: orderStats.data?.[0] || {},
+        // packages: packageStats.data?.[0] || {},
+        transactions: transactionStats.data?.[0] || {},
+        team: teamStats.data?.[0] || {},
+        recent: {
+          orders: recentOrders.data || [],
+          transactions: recentTransactions.data || [],
+        },
+        charts: {
+          daily_orders: dailyOrders.data || [],
+          daily_transactions: dailyTransactions.data || [],
+        },
+      },
+      errors: [
+        !userProfile.success && {
+          section: "profile",
+          error: userProfile.error,
+        },
+        !walletBalance.success && {
+          section: "wallet",
+          error: walletBalance.error,
+        },
+        !orderStats.success && { section: "orders", error: orderStats.error },
+        // !packageStats.success && {
+        //   section: "packages",
+        //   error: packageStats.error,
+        // },
+        !transactionStats.success && {
+          section: "transactions",
+          error: transactionStats.error,
+        },
+        !teamStats.success && { section: "team", error: teamStats.error },
+        !recentOrders.success && {
+          section: "recent_orders",
+          error: recentOrders.error,
+        },
+        !recentTransactions.success && {
+          section: "recent_transactions",
+          error: recentTransactions.error,
+        },
+        !dailyOrders.success && {
+          section: "daily_orders",
+          error: dailyOrders.error,
+        },
+        !dailyTransactions.success && {
+          section: "daily_transactions",
+          error: dailyTransactions.error,
+        },
+      ].filter(Boolean),
+      message: "User dashboard data fetched successfully",
+    });
+  } catch (error) {
+    console.error("Error fetching user dashboard data:", error);
+    res.status(500).json({ success: false, message: "Server error" });
+  }
+};
+
 // @desc    Get Admin Dashboard Data
 // @route   GET /api/dashboard
 exports.getDashboardData = async (req, res) => {
