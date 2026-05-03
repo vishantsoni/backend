@@ -1,7 +1,8 @@
-# GST Report Route Implementation
+# TODO: Enhance getAllPosts with Comments
 
-## Steps
+## Steps:
 
-1. [x] Add `getGSTReport` controller function in `controllers/reportsController.js`
-2. [x] Add `GET /api/reports/gst` route in `routes/reportRoute.js`
-3. [x] Verify syntax
+1. [x] Update controllers/blogController.js: Modify getAllPosts to fetch approved comments for each post and nest them in response.
+2. [x] Test the endpoint (GET http://localhost:3000/api/blogs - mapped from routes/blogRoute.js router.get("/", blogController.getAllPosts)).
+3. [x] Verified: Response is { success: true, data: [posts...] } where each post now has "comments: []" array of approved comments.
+4. [x] [Complete]

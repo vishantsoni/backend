@@ -47,6 +47,8 @@ const upload = multer({
 // Middleware to convert files to base64 data URLs in req.body
 const processProductFiles = (req, res, next) => {
   if (req.files) {
+    // console.log("\n\n\n Files - ", req.files);
+
     // f_image
     const fImageFile = req.files.find((f) => f.fieldname === "f_image");
     if (fImageFile) {
@@ -56,8 +58,10 @@ const processProductFiles = (req, res, next) => {
     }
 
     // g_image[0..2]
+
     for (let i = 0; i < 3; i++) {
       const gImageFile = req.files.find((f) => f.fieldname === `g_image[${i}]`);
+
       if (gImageFile) {
         req.body[`g_image[${i}]`] = `data:${
           gImageFile.mimetype
@@ -101,7 +105,11 @@ router.post(
 );
 router.get("/product-detail/:slug", getProductByslug);
 router.get("/products/:id", getProductById);
-router.put("/products/:id", [authMiddleware, isSuperAdmin], updateProduct);
+router.put(
+  "/products/:id",
+  [authMiddleware, isSuperAdmin, processProductFiles],
+  updateProduct,
+);
 router.delete("/products/:id", [authMiddleware, isSuperAdmin], deleteProduct);
 
 module.exports = router;

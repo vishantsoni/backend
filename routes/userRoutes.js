@@ -9,8 +9,10 @@ const {
   getKycRequests,
   updateKycRequest,
 } = require("../controllers/kycRequestController");
+const authMiddleware = require("../middleware/authMiddleware");
 
 router.get("/downline", auth, userController.getMyDownline);
+router.put("/downline/:id", [auth, isSuperAdmin], userController.updateMember);
 router.get("/tree", auth, userController.getMyTree);
 router.get(
   "/tree-by-id/:id",

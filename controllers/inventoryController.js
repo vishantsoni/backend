@@ -3,7 +3,10 @@ const db = require("../config/db");
 // Distributor: Get my inventory with product details
 exports.getMyInventory = async (req, res) => {
   try {
-    const distributorId = req.user.id;
+    const authUser = req.user;
+
+    const distributorId =
+      authUser.role.toLowerCase() === "super admin" ? 0 : authUser.id;
     const { page = 1, limit = 20, search } = req.query;
     const offset = (parseInt(page) - 1) * parseInt(limit);
 
@@ -184,7 +187,11 @@ exports.adjustStock = async (req, res) => {
   try {
     await client.query("BEGIN");
 
-    const distributorId = req.user.id;
+    // const distributorId = req.user.id;
+    const authUser = req.user;
+
+    const distributorId =
+      authUser.role.toLowerCase() === "super admin" ? 0 : authUser.id;
     const { product_id, variant_id, quantity, reason } = req.body;
 
     if (!product_id || isNaN(parseInt(product_id))) {

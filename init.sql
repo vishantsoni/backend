@@ -295,3 +295,57 @@ CREATE TABLE IF NOT EXISTS milestones (
 );
 
 CREATE INDEX IF NOT EXISTS idx_milestones_level_id ON milestones(level_id);
+
+-- =============================================
+-- BLOG MODULE TABLES
+-- =============================================
+
+-- Blog Categories Table
+CREATE TABLE IF NOT EXISTS blog_categories (
+    id SERIAL PRIMARY KEY,
+    name VARCHAR(100) NOT NULL,
+    slug VARCHAR(100) UNIQUE NOT NULL,
+    description TEXT,
+    status VARCHAR(20) DEFAULT 'active',
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Blog Tags Table
+CREATE TABLE IF NOT EXISTS blog_tags (
+    id SERIAL PRIMARY KEY,
+    name VARCHAR(50) NOT NULL,
+    slug VARCHAR(50) UNIQUE NOT NULL,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Blog Posts Table
+CREATE TABLE IF NOT EXISTS blog_posts (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    title VARCHAR(255) NOT NULL,
+    slug VARCHAR(255) UNIQUE NOT NULL,
+    content TEXT NOT NULL,
+    summary TEXT,
+    featured_image TEXT,
+    category_id INTEGER REFERENCES blog_categories(id) ON DELETE SET NULL,
+    related_product VARCHAR(20) DEFAULT 'none' CHECK (related_product IN ('pad', 'diaper', 'both', 'none')),
+    meta_data JSONB DEFAULT '{}',
+    status VARCHAR(20) DEFAULT 'draft',
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Post Tags Junction Table (Many-to-Many)
+CREATE TABLE IF NOT EXISTS post_tags (
+    post_id UUID REFERENCES blog_posts(id) ON DELETE CASCADE,
+    tag_id INTEGER REFERENCES blog_tags(id) ON DELETE CASCADE,
+    PRIMARY KEY (post_id, tag_id)
+);
+
+-- Indexes for Blog Module
+CREATE INDEX IF NOT EXISTS idx_blog_posts_slug ON blog_posts(slug);
+CREATE INDEX IF NOT EXISTS idx_blog_posts_related_product ON blog_posts(related_product);
+CREATE INDEX IF NOT EXISTS idx_blog_posts_status ON blog_posts(status);
+CREATE INDEX IF NOT EXISTS idx_blog_posts_category_id ON blog_posts(category_id);
+CREATE INDEX IF NOT EXISTS idx_blog_categories_slug ON blog_categories(slug);
+CREATE INDEX IF NOT EXISTS idx_blog_tags_slug ON blog_tags(slug);

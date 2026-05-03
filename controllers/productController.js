@@ -462,11 +462,50 @@ exports.createProduct = async (req, res) => {
       createdVariants.push(v);
     }
 
+    // Insert main store inventory (distributor_id = 0) for new products
+    const client = await db.connect();
+    try {
+      await client.query("BEGIN");
+
+      // Simple product (no variants)
+      if (parsedVariants.length === 0) {
+        await client.query(
+          `
+          INSERT INTO distributor_inventory (distributor_id, product_id, quantity) 
+          VALUES (0, $1, 100)  -- Default stock 100 for simple products
+          ON CONFLICT (distributor_id, product_id, COALESCE(variant_id, 0)) DO NOTHING
+        `,
+          [product.id],
+        );
+      }
+
+      // Variants - use their stock value
+      for (const v of createdVariants) {
+        await client.query(
+          `
+          INSERT INTO distributor_inventory (distributor_id, product_id, variant_id, quantity)
+          VALUES (0, $1, $2, $3)
+          ON CONFLICT (distributor_id, product_id, COALESCE(variant_id, 0)) DO NOTHING
+        `,
+          [product.id, v.id, v.stock || 0],
+        );
+      }
+
+      await client.query("COMMIT");
+      console.log(`Main store inventory added for product ${product.id}`);
+    } catch (invError) {
+      await client.query("ROLLBACK");
+      console.warn("Inventory insert failed (non-critical):", invError.message);
+      // Don't fail product creation
+    } finally {
+      client.release();
+    }
+
     product.variants = createdVariants;
 
     res.status(201).json({
       success: true,
-      message: "Product created successfully with variants",
+      message: "Product created successfully with main store inventory",
       data: product,
     });
   } catch (error) {
@@ -479,47 +518,47 @@ exports.createProduct = async (req, res) => {
   }
 };
 
-exports.getProductById = async (req, res) => {
-  try {
-    const { id } = req.params;
-    if (!id || isNaN(parseInt(id))) {
-      return res.status(400).json({
-        success: false,
-        message: "Valid id (number) is required",
-      });
-    }
-    const productId = parseInt(id);
-    const result = await db.query(
-      `
-      SELECT 
-      p.*, 
-      COUNT(v.id) AS variant_count
-      FROM products p 
-      LEFT JOIN pro_variants v ON p.id = v.product_id
-      WHERE p.id = $1
-      GROUP BY p.id
-    `,
-      [productId],
-    );
-    if (result.rows.length === 0) {
-      return res.status(404).json({
-        success: false,
-        message: "Product not found",
-      });
-    }
-    res.status(200).json({
-      success: true,
-      message: "Product fetched successfully",
-      data: result.rows[0],
-    });
-  } catch (error) {
-    console.error("Error fetching product:", error);
-    res.status(500).json({
-      success: false,
-      message: "Internal server error",
-    });
-  }
-};
+// exports.getProductById = async (req, res) => {
+//   try {
+//     const { id } = req.params;
+//     if (!id || isNaN(parseInt(id))) {
+//       return res.status(400).json({
+//         success: false,
+//         message: "Valid id (number) is required",
+//       });
+//     }
+//     const productId = parseInt(id);
+//     const result = await db.query(
+//       `
+//       SELECT
+//       p.*,
+//       COUNT(v.id) AS variant_count
+//       FROM products p
+//       LEFT JOIN pro_variants v ON p.id = v.product_id
+//       WHERE p.id = $1
+//       GROUP BY p.id
+//     `,
+//       [productId],
+//     );
+//     if (result.rows.length === 0) {
+//       return res.status(404).json({
+//         success: false,
+//         message: "Product not found",
+//       });
+//     }
+//     res.status(200).json({
+//       success: true,
+//       message: "Product fetched successfully",
+//       data: result.rows[0],
+//     });
+//   } catch (error) {
+//     console.error("Error fetching product:", error);
+//     res.status(500).json({
+//       success: false,
+//       message: "Internal server error",
+//     });
+//   }
+// };
 
 // exports.getProductByslug = async (req, res) => {
 //   try {
@@ -660,6 +699,71 @@ exports.getProductById = async (req, res) => {
 //     });
 //   }
 // };
+
+exports.getProductById = async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    if (!id || isNaN(parseInt(id))) {
+      return res.status(400).json({
+        success: false,
+        message: "Valid id (number) is required",
+      });
+    }
+
+    const productId = parseInt(id);
+
+    // 1. Fetch Product details
+    const productResult = await db.query(
+      `SELECT * FROM products WHERE id = $1`,
+      [productId],
+    );
+
+    if (productResult.rows.length === 0) {
+      return res.status(404).json({
+        success: false,
+        message: "Product not found",
+      });
+    }
+
+    let product = productResult.rows[0];
+
+    // 2. Fetch Variants and their Attribute Mappings
+    // We use a Subquery or JSON aggregation to get mappings for each variant
+    const variantsResult = await db.query(
+      `
+      SELECT 
+        v.*,
+        COALESCE(
+          (
+            SELECT json_agg(json_build_object('attr_id', av.attr_id, 'value_id', av.id))
+            FROM variant_attr_mapping vam
+            JOIN attr_values av ON vam.attr_value_id = av.id
+            WHERE vam.variant_id = v.id
+          ), '[]'
+        ) AS attr_mappings
+      FROM pro_variants v
+      WHERE v.product_id = $1
+      `,
+      [productId],
+    );
+
+    // Attach variants to product object
+    product.variants = variantsResult.rows;
+
+    res.status(200).json({
+      success: true,
+      message: "Product fetched successfully",
+      data: product,
+    });
+  } catch (error) {
+    console.error("Error fetching product:", error);
+    res.status(500).json({
+      success: false,
+      message: "Internal server error",
+    });
+  }
+};
 
 exports.getProductByslug = async (req, res) => {
   try {
@@ -803,8 +907,19 @@ exports.getProductByslug = async (req, res) => {
 exports.updateProduct = async (req, res) => {
   try {
     const { id } = req.params;
-    const { name, description, cat_id, f_image, g_image, status, tax_id } =
-      req.body;
+    const {
+      name,
+      description,
+      cat_id,
+      f_image,
+      g_image,
+      status,
+      tax_id,
+      slug,
+    } = req.body;
+    // console.log("g-image - ", req.body);
+    // console.log("g-image - ", req.files);
+
     if (!id || isNaN(parseInt(id))) {
       return res.status(400).json({
         success: false,
@@ -815,6 +930,10 @@ exports.updateProduct = async (req, res) => {
     const updates = [];
     const values = [];
     let paramIndex = 1;
+
+    const uploadDir = pathModule.join("uploads", "products", slug);
+    await fs.mkdir(uploadDir, { recursive: true });
+
     if (name !== undefined) {
       if (typeof name !== "string" || name.trim().length === 0) {
         return res
@@ -837,12 +956,36 @@ exports.updateProduct = async (req, res) => {
     }
     if (f_image !== undefined) {
       updates.push(`f_image = $${paramIndex}`);
-      values.push(f_image);
+
+      let fImagePath = null;
+      const fImageBase64 = req.body.f_image;
+      if (fImageBase64 && fImageBase64.startsWith("data:")) {
+        const base64Data = fImageBase64.split(",")[1];
+        const buffer = Buffer.from(base64Data, "base64");
+        fImagePath = `${process.env.APP_URL}/uploads/products/${slug}/featured.jpg`;
+        await fs.writeFile(pathModule.join(uploadDir, "featured.jpg"), buffer);
+      }
+      values.push(fImagePath);
       paramIndex++;
     }
     if (g_image !== undefined) {
       updates.push(`g_image = $${paramIndex}`);
-      values.push(Array.isArray(g_image) ? g_image : []);
+
+      const gImagePaths = [];
+      for (let i = 0; i < 3; i++) {
+        const gImageKey = `g_image[${i}]`;
+        const gImageBase64 = req.body[gImageKey];
+        if (gImageBase64 && gImageBase64.startsWith("data:")) {
+          const base64Data = gImageBase64.split(",")[1];
+          const buffer = Buffer.from(base64Data, "base64");
+          const fileName = `gallery_${i + 1}.jpg`;
+          const filePath = `${process.env.APP_URL}/uploads/products/${slug}/${fileName}`;
+          await fs.writeFile(pathModule.join(uploadDir, fileName), buffer);
+          gImagePaths.push(filePath);
+        }
+      }
+
+      values.push(gImagePaths);
       paramIndex++;
     }
     if (status !== undefined) {

@@ -2,12 +2,12 @@ const db = require("../config/db");
 
 exports.getKycRequests = async (req, res) => {
   try {
-    console.log("fetching start");
+    // console.log("fetching start");
 
     const page = parseInt(req.query.page) || 1;
     const limit = parseInt(req.query.limit) || 10;
     const offset = (page - 1) * limit;
-
+    // WHERE kr.status IN ('pending', 'under_review')
     const requests = await db.query(
       `
       SELECT 
@@ -18,9 +18,18 @@ exports.getKycRequests = async (req, res) => {
       FROM kyc_requests kr
       JOIN users u ON kr.user_id = u.id
       LEFT JOIN kyc_documents kd ON kr.user_id = kd.user_id
-      WHERE kr.status IN ('pending', 'under_review')
+      
       GROUP BY kr.id, u.id
-      ORDER BY kr.created_at DESC
+      ORDER BY 
+      -- 1. Custom Priority (Weighting)
+      CASE 
+          WHEN kr.status = 'under_review' THEN 1
+          WHEN kr.status = 'pending' THEN 2
+          WHEN kr.status = 'approved' THEN 3
+          ELSE 4 
+      END ASC,
+      -- 2. Newest requests first within those groups
+      kr.created_at DESC
       LIMIT $1 OFFSET $2
     `,
       [limit, offset],

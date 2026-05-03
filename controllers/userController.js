@@ -12,13 +12,65 @@ exports.getDownline = async (req, res) => {
     // Query: Find everyone whose path starts with the current user's path
     // The <@ operator in ltree means "is a descendant of"
     const downline = await db.query(
-      "SELECT id, username, role, node_path, referrer_id FROM users WHERE node_path <@ $1 AND node_path != $1",
+      "SELECT id, username, role, node_path, name, referrer_id FROM users WHERE node_path <@ $1 AND node_path != $1",
       [userPath],
     );
 
     res.json(downline.rows);
   } catch (err) {
     res.status(500).send("Server Error");
+  }
+};
+
+exports.updateMember = async (req, res) => {
+  try {
+    const { id } = req.params; // Get member ID from URL
+    const { name, email, phone, status } = req.body;
+
+    // 1. Basic Validation
+    if (!id) {
+      return res
+        .status(400)
+        .json({ status: false, message: "Member ID is required" });
+    }
+
+    // 2. Perform the Update
+    // full_name is used here based on your 'getMyDownline' query (u.full_name as name)
+    const result = await db.query(
+      `UPDATE users 
+       SET 
+         full_name = $1, 
+         email = $2, 
+         phone = $3, 
+         is_active = $4         
+       WHERE id = $5
+       RETURNING id, full_name as name, email, phone, is_active,created_at`,
+      [name, email, phone, status, id],
+    );
+
+    // 3. Check if user existed
+    if (result.rows.length === 0) {
+      return res
+        .status(404)
+        .json({ status: false, message: "Member not found" });
+    }
+
+    // 4. Success Response
+    res.status(200).json({
+      status: true,
+      message: "Member updated successfully",
+      data: result.rows[0],
+    });
+  } catch (error) {
+    // Check for unique constraint violations (like email already exists)
+    if (error.code === "23505") {
+      return res
+        .status(400)
+        .json({ status: false, message: "Email already in use" });
+    }
+
+    console.log("error in update member by super admin - ", error);
+    res.status(500).json({ status: false, message: "Server error" });
   }
 };
 
@@ -44,6 +96,7 @@ exports.getMyDownline = async (req, res) => {
         u.node_path, 
         u.referrer_id, 
         u.created_at,
+        u.full_name as name,
         -- Subquery to count descendants for each row
         (
           SELECT COUNT(*) 
