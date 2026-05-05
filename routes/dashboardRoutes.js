@@ -3,6 +3,7 @@ const router = express.Router();
 const {
   getDashboardData,
   getUserDashboardData,
+  getAnalytics,
 } = require("../controllers/dashboardController");
 const authMiddleware = require("../middleware/authMiddleware");
 const isAdminOrSuperAdmin = require("../middleware/isAdminOrSuperAdmin");
@@ -16,5 +17,10 @@ router.get("/me", authMiddleware, getUserDashboardData);
 // @desc    Get admin dashboard overview data
 // @access  Admin/SuperAdmin
 router.get("/", authMiddleware, isAdminOrSuperAdmin, getDashboardData);
+
+// @route   GET api/dashboard/analytics
+// @desc    Get MLM analytics metrics (Total Referrals, Active Downline, Commissions, Conversion Rate)
+// @access  Admin/SuperAdmin
+router.get("/analytics", authMiddleware, getAnalytics);
 
 module.exports = router;

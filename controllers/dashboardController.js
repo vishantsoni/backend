@@ -64,19 +64,6 @@ exports.getUserDashboardData = async (req, res) => {
       {},
     );
 
-    // ─── 4. PACKAGE PURCHASES ───
-    // const packageStats = await safeQuery(
-    //   `
-    //   SELECT
-    //     COUNT(*)::int as total_packages,
-    //     COALESCE(SUM(amount), 0)::numeric(12,2) as total_invested
-    //   FROM user_packages
-    //   WHERE user_id = $1 AND status = 'activated'
-    //   `,
-    //   [userId],
-    //   {},
-    // );
-
     // ─── 5. TRANSACTION STATISTICS ───
     const transactionStats = await safeQuery(
       `
@@ -176,7 +163,6 @@ exports.getUserDashboardData = async (req, res) => {
         profile: userProfile.data?.[0] || {},
         wallet: walletBalance.data?.[0] || {},
         orders: orderStats.data?.[0] || {},
-        // packages: packageStats.data?.[0] || {},
         transactions: transactionStats.data?.[0] || {},
         team: teamStats.data?.[0] || {},
         recent: {
@@ -188,42 +174,6 @@ exports.getUserDashboardData = async (req, res) => {
           daily_transactions: dailyTransactions.data || [],
         },
       },
-      errors: [
-        !userProfile.success && {
-          section: "profile",
-          error: userProfile.error,
-        },
-        !walletBalance.success && {
-          section: "wallet",
-          error: walletBalance.error,
-        },
-        !orderStats.success && { section: "orders", error: orderStats.error },
-        // !packageStats.success && {
-        //   section: "packages",
-        //   error: packageStats.error,
-        // },
-        !transactionStats.success && {
-          section: "transactions",
-          error: transactionStats.error,
-        },
-        !teamStats.success && { section: "team", error: teamStats.error },
-        !recentOrders.success && {
-          section: "recent_orders",
-          error: recentOrders.error,
-        },
-        !recentTransactions.success && {
-          section: "recent_transactions",
-          error: recentTransactions.error,
-        },
-        !dailyOrders.success && {
-          section: "daily_orders",
-          error: dailyOrders.error,
-        },
-        !dailyTransactions.success && {
-          section: "daily_transactions",
-          error: dailyTransactions.error,
-        },
-      ].filter(Boolean),
       message: "User dashboard data fetched successfully",
     });
   } catch (error) {
@@ -474,56 +424,86 @@ exports.getDashboardData = async (req, res) => {
           daily_packages: dailyPackages.data || [],
         },
       },
-      errors: [
-        !userStats.success && { section: "users", error: userStats.error },
-        !orderStats.success && { section: "orders", error: orderStats.error },
-        !packageStats.success && {
-          section: "packages",
-          error: packageStats.error,
-        },
-        !kycStats.success && { section: "kyc", error: kycStats.error },
-        !walletStats.success && { section: "wallet", error: walletStats.error },
-        !transactionStats.success && {
-          section: "transactions",
-          error: transactionStats.error,
-        },
-        !productStats.success && {
-          section: "products",
-          error: productStats.error,
-        },
-        !recentOrders.success && {
-          section: "recent_orders",
-          error: recentOrders.error,
-        },
-        !recentUsers.success && {
-          section: "recent_users",
-          error: recentUsers.error,
-        },
-        !recentTransactions.success && {
-          section: "recent_transactions",
-          error: recentTransactions.error,
-        },
-        !dailySales.success && {
-          section: "daily_sales",
-          error: dailySales.error,
-        },
-        !dailyUsers.success && {
-          section: "daily_users",
-          error: dailyUsers.error,
-        },
-        !dailyPackages.success && {
-          section: "daily_packages",
-          error: dailyPackages.error,
-        },
-        !notificationCount.success && {
-          section: "notifications",
-          error: notificationCount.error,
-        },
-      ].filter(Boolean),
       message: "Dashboard data fetched successfully",
     });
   } catch (error) {
     console.error("Error fetching dashboard data:", error);
     res.status(500).json({ success: false, message: "Server error" });
+  }
+};
+
+// @desc    Get Analytics Data (Total Referrals, Active Downline, Commissions, Conversion Rate)
+// @route   GET /api/dashboard/analytics
+exports.getAnalytics = async (req, res) => {
+  try {
+    const id = req.user.id;
+
+    const query = `
+      WITH settings AS (
+        SELECT 
+          NULLIF((setting_value->>'uv_value')::numeric, 0) as uv_factor
+        FROM app_settings 
+        WHERE setting_key = 'point_system' 
+        LIMIT 1
+      )
+      SELECT
+        -- 1. Referral Stats
+        (SELECT COUNT(*) FROM users WHERE node_path ~ $1 AND id != $2)::int as total_referrals,
+        (SELECT COUNT(*) FROM users WHERE node_path ~ $1 AND is_active = true AND id != $2)::int as active_downline,
+        
+        -- 2. Commission Stats (Dynamic UV Conversion)
+        (
+          SELECT COALESCE(SUM(amount / s.uv_factor), 0)::numeric(12,2)
+          FROM transactions, settings s
+          WHERE user_id = $2 
+            AND category = 'commission' 
+            AND type = 'credit' 
+            AND status = 'pending'
+        ) as uv_commissions,
+
+        -- 3. Conversion Rate Logic
+        (
+          SELECT 
+            CASE 
+              WHEN COUNT(*) > 0 THEN 
+                ROUND((COUNT(*) FILTER (WHERE is_active = true) * 100.0 / COUNT(*)), 1)::text || '%'
+              ELSE '0%' 
+            END
+          FROM users WHERE node_path ~ $1 AND id != $2
+        ) as conversion_rate
+      FROM settings;
+    `;
+
+    // Using node_path logic from your MLM structure
+    const analyticsResult = await safeQuery(query, [id.toString(), id], [{}]);
+    const data = analyticsResult.data?.[0] || {
+      total_referrals: 0,
+      active_downline: 0,
+      uv_commissions: 0,
+      conversion_rate: "0%",
+    };
+
+    return res.json({
+      success: true,
+      data: {
+        total_referrals: parseInt(data.total_referrals),
+        active_downline: parseInt(data.active_downline),
+        uv_commissions: parseFloat(data.uv_commissions),
+        conversion_rate: data.conversion_rate,
+      },
+      message: "Analytics data fetched successfully",
+    });
+  } catch (error) {
+    console.error("Error fetching analytics data:", error);
+    res.status(500).json({
+      success: false,
+      message: "Server error",
+      data: {
+        total_referrals: 0,
+        active_downline: 0,
+        uv_commissions: 0,
+        conversion_rate: "0%",
+      },
+    });
   }
 };
