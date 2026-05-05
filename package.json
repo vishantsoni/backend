@@ -21,7 +21,8 @@
     "nodemailer": "^8.0.5",
     "pg": "^8.11.5",
     "qrcode": "^1.5.4",
-    "razorpay": "^2.9.6"
+    "razorpay": "^2.9.6",
+    "slugify": "^1.6.9"
   },
   "devDependencies": {
     "nodemon": "^3.1.0"
