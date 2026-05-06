@@ -3,6 +3,7 @@ const router = express.Router();
 const ticketController = require("../controllers/ticketController");
 const auth = require("../middleware/authMiddleware");
 const isAdmin = require("../middleware/isAdmin");
+const isSuperAdmin = require("../middleware/isSuperAdmin");
 const ecomAuth = require("../middleware/ecomAuth");
 
 // Public: Raise ticket (no auth needed)
@@ -17,7 +18,12 @@ router.post("/:caseId/reply", auth, ticketController.replyToTicket);
 router.get("/dis/my-tickets", auth, ticketController.getDistributorTickets);
 
 // Admin routes
-router.get("/admin", auth, isAdmin, ticketController.getAllTicketsAdmin);
+router.get(
+  "/admin/all",
+  auth,
+  isSuperAdmin,
+  ticketController.getAllTicketsAdmin,
+);
 router.put("/:id/status", auth, isAdmin, ticketController.updateTicketStatus);
 
 module.exports = router;
