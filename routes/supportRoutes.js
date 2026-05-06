@@ -24,6 +24,11 @@ router.get(
   isSuperAdmin,
   ticketController.getAllTicketsAdmin,
 );
-router.put("/:id/status", auth, isAdmin, ticketController.updateTicketStatus);
+router.put(
+  "/:id/status",
+  auth,
+  isSuperAdmin,
+  ticketController.updateTicketStatus,
+);
 
 module.exports = router;
