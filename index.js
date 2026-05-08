@@ -51,6 +51,7 @@ app.use("/api/milestones", require("./routes/milestoneRoutes"));
 app.use("/api/blog", require("./routes/blogRoute"));
 app.use("/api/support", require("./routes/supportRoutes"));
 app.use("/api/business", require("./routes/businessRoutes"));
+app.use("/api/sample-requests", require("./routes/sampleRequestRoutes"));
 app.post("/api/upload", async (req, res) => {
   try {
     // 1. चेक करें कि फाइल्स आई हैं या नहीं
