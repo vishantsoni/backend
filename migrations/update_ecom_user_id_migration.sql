@@ -1,3 +1,2 @@
-ALTER TABLE tickets 
-ALTER COLUMN ecom_user_id TYPE VARCHAR(255) 
-USING ecom_user_id::VARCHAR(255);
+ALTER TABLE products 
+ADD COLUMN short_desc text NOT NULL DEFAULT '';

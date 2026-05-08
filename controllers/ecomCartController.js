@@ -266,22 +266,172 @@ exports.get_d_Cart = async (req, res) => {
   }
 };
 
+// exports.addCartItem = async (req, res) => {
+//   try {
+//     const userId = req.user.id;
+//     const { product_id, variation_id, quantity = 1, price } = req.body;
+
+//     if (quantity < 1 || !Number.isInteger(Number(quantity))) {
+//       return res
+//         .status(400)
+//         .json({ status: false, error: "quantity must be integer >= 1" });
+//     }
+//     if (!price || typeof price !== "number" || price <= 0) {
+//       return res
+//         .status(400)
+//         .json({ status: false, error: "Valid price (> 0) is required" });
+//     }
+
+//     let cartResult = await db.query(
+//       "SELECT id FROM e_carts WHERE user_id = $1",
+//       [userId],
+//     );
+//     let cartId;
+
+//     if (cartResult.rows.length === 0) {
+//       const newCart = await db.query(
+//         "INSERT INTO e_carts (user_id) VALUES ($1) RETURNING id",
+//         [userId],
+//       );
+//       cartId = newCart.rows[0].id;
+//     } else {
+//       cartId = cartResult.rows[0].id;
+//     }
+
+//     // Check existing item
+//     const existing = await db.query(
+//       "SELECT id, quantity FROM e_cart_items WHERE cart_id = $1 AND product_id = $2 AND (variation_id = $3 OR variation_id IS NULL)",
+//       [cartId, product_id, variation_id || null],
+//     );
+
+//     if (existing.rows.length > 0) {
+//       // Update quantity
+//       await db.query(
+//         "UPDATE e_cart_items SET quantity = quantity + $1, updated_at = CURRENT_TIMESTAMP WHERE id = $2",
+//         [quantity, existing.rows[0].id],
+//       );
+//     } else {
+//       // Insert new
+//       await db.query(
+//         `INSERT INTO e_cart_items (cart_id, product_id, variation_id, quantity, price)
+//          VALUES ($1, $2, $3, $4, $5)`,
+//         [cartId, product_id, variation_id || null, quantity, price],
+//       );
+//     }
+
+//     res.status(201).json({ status: true, message: "Item added to cart" });
+//   } catch (err) {
+//     console.error(err);
+//     res.status(500).json({ status: false, error: "Server error" });
+//   }
+// };
+
+// exports.addCartItem = async (req, res) => {
+//   try {
+//     const userId = req.user.id;
+//     const { product_id, variation_id, quantity = 1, price } = req.body;
+
+//     // Basic Validation
+//     if (quantity < 1 || !Number.isInteger(Number(quantity))) {
+//       return res
+//         .status(400)
+//         .json({ status: false, error: "Quantity must be integer >= 1" });
+//     }
+//     if (!price || typeof price !== "number" || price <= 0) {
+//       return res
+//         .status(400)
+//         .json({ status: false, error: "Valid price (> 0) is required" });
+//     }
+
+//     // 1. Validate with Inventory (Summing all distributors)
+//     const invQuery = `
+//       SELECT COALESCE(SUM(quantity), 0) as available_stock
+//       FROM distributor_inventory
+//       WHERE product_id = $1 AND (variant_id = $2 OR (variant_id IS NULL AND $2 IS NULL))
+//     `;
+//     const invResult = await db.query(invQuery, [
+//       product_id,
+//       variation_id || null,
+//     ]);
+//     const availableStock = parseInt(invResult.rows[0].available_stock);
+
+//     if (availableStock <= 0) {
+//       return res
+//         .status(400)
+//         .json({ status: false, error: "Product is out of stock" });
+//     }
+
+//     // 2. Get or Create Cart
+//     let cartResult = await db.query(
+//       "SELECT id FROM e_carts WHERE user_id = $1",
+//       [userId],
+//     );
+//     let cartId =
+//       cartResult.rows.length === 0
+//         ? (
+//             await db.query(
+//               "INSERT INTO e_carts (user_id) VALUES ($1) RETURNING id",
+//               [userId],
+//             )
+//           ).rows[0].id
+//         : cartResult.rows[0].id;
+
+//     // 3. Check existing item in cart to calculate total requested quantity
+//     const existing = await db.query(
+//       "SELECT id, quantity FROM e_cart_items WHERE cart_id = $1 AND product_id = $2 AND (variation_id = $3 OR (variation_id IS NULL AND $3 IS NULL))",
+//       [cartId, product_id, variation_id || null],
+//     );
+
+//     const currentCartQty =
+//       existing.rows.length > 0 ? parseInt(existing.rows[0].quantity) : 0;
+//     const totalRequestedQty = currentCartQty + parseInt(quantity);
+
+//     // 4. Final Stock Check (Cart Qty + New Qty vs Available Stock)
+//     if (totalRequestedQty > availableStock) {
+//       return res.status(400).json({
+//         status: false,
+//         error: `Only ${availableStock} units available in stock. You already have ${currentCartQty} in cart.`,
+//       });
+//     }
+
+//     if (existing.rows.length > 0) {
+//       // Update
+//       await db.query(
+//         "UPDATE e_cart_items SET quantity = quantity + $1, updated_at = CURRENT_TIMESTAMP WHERE id = $2",
+//         [quantity, existing.rows[0].id],
+//       );
+//     } else {
+//       // Insert
+//       await db.query(
+//         `INSERT INTO e_cart_items (cart_id, product_id, variation_id, quantity, price)
+//          VALUES ($1, $2, $3, $4, $5)`,
+//         [cartId, product_id, variation_id || null, quantity, price],
+//       );
+//     }
+
+//     res.status(201).json({ status: true, message: "Item added to cart" });
+//   } catch (err) {
+//     console.error(err);
+//     res.status(500).json({ status: false, error: "Server error" });
+//   }
+// };
+
 exports.addCartItem = async (req, res) => {
   try {
     const userId = req.user.id;
-    const { product_id, variation_id, quantity = 1, price } = req.body;
+    const {
+      product_id,
+      variation_id,
+      quantity = 1,
+      price,
+      distributor_id,
+    } = req.body;
 
-    // // Input validation
-    // if (!product_id || !isValidUUID(product_id)) {
-    //   return res.status(400).json({ status: false, error: 'Valid product_id (UUID) is required' });
-    // }
-    // if (variation_id && !isValidUUID(variation_id)) {
-    //   return res.status(400).json({ status: false, error: 'Valid variation_id (UUID) is required' });
-    // }
+    // Basic Validation
     if (quantity < 1 || !Number.isInteger(Number(quantity))) {
       return res
         .status(400)
-        .json({ status: false, error: "quantity must be integer >= 1" });
+        .json({ status: false, error: "Quantity must be integer >= 1" });
     }
     if (!price || typeof price !== "number" || price <= 0) {
       return res
@@ -289,44 +439,118 @@ exports.addCartItem = async (req, res) => {
         .json({ status: false, error: "Valid price (> 0) is required" });
     }
 
+    let finalDistributorId = null;
+    let availableStock = 0;
+
+    // --- STEP 1: STOCK CHECK LOGIC ---
+
+    // 1a. If distributor_id is provided, check their specific stock first
+    if (distributor_id) {
+      const distInv = await db.query(
+        `SELECT COALESCE(SUM(quantity), 0) as stock 
+         FROM distributor_inventory 
+         WHERE product_id = $1 AND (variant_id = $2 OR (variant_id IS NULL AND $2 IS NULL))
+         AND distributor_id = $3`,
+        [product_id, variation_id || null, distributor_id],
+      );
+
+      availableStock = parseInt(distInv.rows[0].stock);
+
+      if (availableStock >= quantity) {
+        // Distributor has enough stock
+        finalDistributorId = parseInt(distributor_id);
+      } else {
+        // Not enough at distributor, try fallback to Admin (Global)
+        const adminInv = await db.query(
+          `SELECT COALESCE(SUM(quantity), 0) as stock 
+           FROM distributor_inventory 
+           WHERE product_id = $1 AND (variant_id = $2 OR (variant_id IS NULL AND $2 IS NULL))`,
+          [product_id, variation_id || null],
+        );
+        availableStock = parseInt(adminInv.rows[0].stock);
+        finalDistributorId = null; // Mark as Admin stock
+      }
+    } else {
+      // 1b. No distributor_id provided, check Admin stock directly
+      const adminInv = await db.query(
+        `SELECT COALESCE(SUM(quantity), 0) as stock 
+         FROM distributor_inventory 
+         WHERE product_id = $1 AND (variant_id = $2 OR (variant_id IS NULL AND $2 IS NULL))`,
+        [product_id, variation_id || null],
+      );
+      availableStock = parseInt(adminInv.rows[0].stock);
+      finalDistributorId = null;
+    }
+
+    // Final Stock Gate
+    if (availableStock < quantity) {
+      return res
+        .status(400)
+        .json({ status: false, error: "Product is out of stock" });
+    }
+
+    // --- STEP 2: CART OPERATIONS ---
+
+    // Get or Create Cart
     let cartResult = await db.query(
       "SELECT id FROM e_carts WHERE user_id = $1",
       [userId],
     );
-    let cartId;
+    let cartId =
+      cartResult.rows.length === 0
+        ? (
+            await db.query(
+              "INSERT INTO e_carts (user_id) VALUES ($1) RETURNING id",
+              [userId],
+            )
+          ).rows[0].id
+        : cartResult.rows[0].id;
 
-    if (cartResult.rows.length === 0) {
-      const newCart = await db.query(
-        "INSERT INTO e_carts (user_id) VALUES ($1) RETURNING id",
-        [userId],
-      );
-      cartId = newCart.rows[0].id;
-    } else {
-      cartId = cartResult.rows[0].id;
-    }
-
-    // Check existing item
+    // Check existing item (using the finalDistributorId determined above)
     const existing = await db.query(
-      "SELECT id, quantity FROM e_cart_items WHERE cart_id = $1 AND product_id = $2 AND (variation_id = $3 OR variation_id IS NULL)",
-      [cartId, product_id, variation_id || null],
+      `SELECT id, quantity FROM e_cart_items 
+       WHERE cart_id = $1 AND product_id = $2 
+       AND (variation_id = $3 OR (variation_id IS NULL AND $3 IS NULL))
+       AND (distributor_id = $4 OR (distributor_id IS NULL AND $4 IS NULL))`,
+      [cartId, product_id, variation_id || null, finalDistributorId],
     );
 
+    const currentCartQty =
+      existing.rows.length > 0 ? parseInt(existing.rows[0].quantity) : 0;
+
+    // Final check to ensure total cart qty doesn't exceed stock
+    if (currentCartQty + parseInt(quantity) > availableStock) {
+      return res.status(400).json({
+        status: false,
+        error: `Insufficient total stock. Available: ${availableStock}. In cart: ${currentCartQty}`,
+      });
+    }
+
     if (existing.rows.length > 0) {
-      // Update quantity
       await db.query(
         "UPDATE e_cart_items SET quantity = quantity + $1, updated_at = CURRENT_TIMESTAMP WHERE id = $2",
         [quantity, existing.rows[0].id],
       );
     } else {
-      // Insert new
       await db.query(
-        `INSERT INTO e_cart_items (cart_id, product_id, variation_id, quantity, price)
-         VALUES ($1, $2, $3, $4, $5)`,
-        [cartId, product_id, variation_id || null, quantity, price],
+        `INSERT INTO e_cart_items (cart_id, product_id, variation_id, quantity, price, distributor_id)
+         VALUES ($1, $2, $3, $4, $5, $6)`,
+        [
+          cartId,
+          product_id,
+          variation_id || null,
+          quantity,
+          price,
+          finalDistributorId,
+        ],
       );
     }
 
-    res.status(201).json({ status: true, message: "Item added to cart" });
+    res.status(201).json({
+      status: true,
+      message: "Item added to cart",
+      fulfilled_by: finalDistributorId ? "distributor" : "admin",
+    });
   } catch (err) {
     console.error(err);
     res.status(500).json({ status: false, error: "Server error" });
@@ -430,12 +654,47 @@ exports.updateCartItem = async (req, res) => {
   }
 };
 
+// exports.updateCartItemQuantity = async (req, res) => {
+//   try {
+//     const userId = req.user.id;
+//     const { id: item_id } = req.params;
+//     const { quantity } = req.body;
+
+//     if (!item_id || quantity < 1 || !Number.isInteger(Number(quantity))) {
+//       return res.status(400).json({
+//         status: false,
+//         error: "Valid item_id and quantity (>=1 integer) required",
+//       });
+//     }
+
+//     const result = await db.query(
+//       `UPDATE e_cart_items
+//        SET quantity = $1, updated_at = CURRENT_TIMESTAMP
+//        WHERE id = $2 AND cart_id IN (SELECT id FROM e_carts WHERE user_id = $3)
+//        RETURNING id`,
+//       [quantity, item_id, userId],
+//     );
+
+//     if (result.rows.length === 0) {
+//       return res
+//         .status(404)
+//         .json({ status: false, error: "Item not found or access denied" });
+//     }
+
+//     res.json({ status: true, message: "Cart item quantity updated" });
+//   } catch (err) {
+//     console.error(err);
+//     res.status(500).json({ status: false, error: "Server error" });
+//   }
+// };
+
 exports.updateCartItemQuantity = async (req, res) => {
   try {
     const userId = req.user.id;
     const { id: item_id } = req.params;
     const { quantity } = req.body;
 
+    // 1. Basic Input Validation
     if (!item_id || quantity < 1 || !Number.isInteger(Number(quantity))) {
       return res.status(400).json({
         status: false,
@@ -443,23 +702,65 @@ exports.updateCartItemQuantity = async (req, res) => {
       });
     }
 
-    const result = await db.query(
-      `UPDATE e_cart_items 
-       SET quantity = $1, updated_at = CURRENT_TIMESTAMP 
-       WHERE id = $2 AND cart_id IN (SELECT id FROM e_carts WHERE user_id = $3)
-       RETURNING id`,
-      [quantity, item_id, userId],
+    // 2. Fetch item details including its distributor_id
+    const itemData = await db.query(
+      `SELECT ci.product_id, ci.variation_id, ci.distributor_id 
+       FROM e_cart_items ci
+       JOIN e_carts c ON ci.cart_id = c.id
+       WHERE ci.id = $1 AND c.user_id = $2`,
+      [item_id, userId],
     );
 
-    if (result.rows.length === 0) {
+    if (itemData.rows.length === 0) {
       return res
         .status(404)
-        .json({ status: false, error: "Item not found or access denied" });
+        .json({ status: false, error: "Cart item not found" });
     }
 
-    res.json({ status: true, message: "Cart item quantity updated" });
+    const { product_id, variation_id, distributor_id } = itemData.rows[0];
+
+    // 3. Inventory Check based on distributor_id
+    // Logic: If distributor_id is NULL, check global/admin stock.
+    // If distributor_id exists, check only that specific distributor.
+    const invQuery = `
+      SELECT COALESCE(SUM(quantity), 0) as available_stock 
+      FROM distributor_inventory 
+      WHERE product_id = $1 
+      AND (variant_id = $2 OR (variant_id IS NULL AND $2 IS NULL))
+      AND ($3::int IS NULL OR distributor_id = $3::int)
+    `;
+
+    const invResult = await db.query(invQuery, [
+      product_id,
+      variation_id || null,
+      distributor_id, // This will be null or number from the cart item
+    ]);
+
+    const availableStock = parseInt(invResult.rows[0].available_stock);
+
+    // 4. Validate requested quantity against stock
+    if (quantity > availableStock) {
+      return res.status(400).json({
+        status: false,
+        error: `Only ${availableStock} units available in stock from the selected source.`,
+      });
+    }
+
+    // 5. Update the quantity
+    await db.query(
+      `UPDATE e_cart_items 
+       SET quantity = $1, updated_at = CURRENT_TIMESTAMP 
+       WHERE id = $2`,
+      [quantity, item_id],
+    );
+
+    res.json({
+      status: true,
+      message: "Cart item quantity updated",
+      stock_type: distributor_id ? "Distributor" : "Admin",
+    });
   } catch (err) {
-    console.error(err);
+    console.error("Error updating cart quantity:", err);
     res.status(500).json({ status: false, error: "Server error" });
   }
 };

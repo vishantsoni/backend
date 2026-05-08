@@ -1,10 +1,9 @@
-# Task: Update getAnalytics to filter commissions by UV status (pending)
+# TODO - Dashboard ecom/me metrics
 
-## Steps:
-
-- [x] 1. Understand files and create detailed plan (completed)
-- [x] 2. Edit controllers/dashboardController.js: Update commissionStats query to filter by status = 'pending' (UV)
-- [x] 3. Test the change
-- [x] 4. Complete task
-
-**All steps completed successfully!**
+- [ ] Implement new dashboard metrics function "dashboard" in controllers/dashboardController.js
+  - Total Orders (COUNT from orders)
+  - Open Tickets (COUNT from tickets with non-closed status)
+  - Total Order Value (SUM total_amount from orders)
+- [ ] Wire route /ecom/me to the new function in routes/dashboardRoutes.js
+- [ ] Add/verify required SQL column names for tickets and orders
+- [ ] Run lint/tests or start server to validate endpoint response shape

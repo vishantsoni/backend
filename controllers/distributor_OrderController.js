@@ -110,10 +110,21 @@ const distributeCommission = async (client, userId, body) => {
             );
 
             // G. Final Wallet & Transaction Update
-            await client.query(
-              `UPDATE wallets SET total_amount = total_amount + $1, paid_pairs = $2 WHERE user_id = $3`,
+            const walletUpdateFinal = await client.query(
+              `UPDATE wallets SET total_amount = total_amount + $1, paid_pairs = $2 WHERE user_id = $3 RETURNING paid_pairs`,
               [commissionAmount, currentMatches, upline.id],
             );
+
+            const updatedPaidPairs = walletUpdateFinal.rows[0].paid_pairs;
+
+            // --- INTEGRATION START: Milestone Check ---
+            // This checks if the user hit any milestone based on their new paid_pairs count
+            await checkAndDistributeMilestone(
+              client,
+              upline.id,
+              updatedPaidPairs,
+            );
+            // --- INTEGRATION END ---
 
             await client.query(
               `INSERT INTO transactions (user_id, amount, type, category, source_user_id, status, remarks)
@@ -145,6 +156,72 @@ const distributeCommission = async (client, userId, body) => {
   } catch (error) {
     console.error("Distribution Error:", error);
     throw error; // d_p_o function isse catch karke rollback trigger karega
+  }
+};
+
+/**
+ * @param {object} client - PostgreSQL client for transaction safety
+ * @param {number} userId - The upline user ID to check milestones for
+ * @param {number} currentPaidPairs - The updated paid_pairs count of the user
+ */
+const checkAndDistributeMilestone = async (
+  client,
+  userId,
+  currentPaidPairs,
+) => {
+  try {
+    // 1. Find the highest milestone the user qualifies for that hasn't been paid yet
+    // Linked via level_id as shown in image_6949b4.png
+    const milestoneQuery = await client.query(
+      `SELECT m.id, m.milestone_name, m.reward_cash, lc.team_size
+       FROM level_milestones m
+       JOIN level_commissions lc ON m.level_id = lc.id
+       WHERE lc.team_size <= $1 
+       AND NOT EXISTS (
+         SELECT 1 FROM transactions 
+         WHERE user_id = $2 
+         AND category = 'milestone' 
+         AND remarks LIKE '%' || m.milestone_name || '%'
+       )
+       ORDER BY lc.team_size DESC LIMIT 1`,
+      [currentPaidPairs, userId],
+    );
+
+    if (milestoneQuery.rows.length > 0) {
+      const milestone = milestoneQuery.rows[0];
+
+      // 2. Update the Company Fund (Non-withdrawable)
+      await client.query(
+        `UPDATE wallets 
+         SET company_fund = company_fund + $1 
+         WHERE user_id = $2`,
+        [milestone.reward_cash, userId],
+      );
+
+      // 3. Log the milestone transaction
+      await client.query(
+        `INSERT INTO transactions (user_id, amount, type, category, status, remarks)
+         VALUES ($1, $2, 'credit', 'milestone', 'completed', $3)`,
+        [
+          userId,
+          milestone.reward_cash,
+          `Milestone Reached: ${milestone.milestone_name} (Team Size: ${milestone.team_size})`,
+        ],
+      );
+
+      console.log(
+        `Milestone ${milestone.milestone_name} credited to User ${userId}`,
+      );
+
+      // return { success: true, name: milestone.milestone_name };
+    }
+    // return { success: false };
+  } catch (error) {
+    console.error("Milestone Error:", error);
+    // We don't throw here to avoid failing the whole commission if milestone check fails,
+    // OR you can throw if you want the whole order to rollback.
+    // return { success: false, error };
+    throw error;
   }
 };
 

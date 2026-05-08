@@ -8,6 +8,293 @@ const generateOrderId = () => {
 };
 
 // User: Place new order (wallet payment)
+// exports.placeOrder = async (req, res) => {
+//   const client = await db.connect();
+//   try {
+//     await client.query("BEGIN");
+
+//     const userId = req.user.id;
+//     const {
+//       items, // [{product_id, variant_id, qty}],
+//       shipping_address,
+//       coupon_code,
+//       payment_method = "wallet",
+//       order_for = "admin",
+//     } = req.body;
+
+//     if (!items || !Array.isArray(items) || items.length === 0) {
+//       return res
+//         .status(400)
+//         .json({ success: false, message: "Items required" });
+//     }
+
+//     // Determine target distributor for inventory management
+//     let targetDistributorId = null;
+
+//     // 1. Check explicit distributor_id in request
+//     if (req.body.distributor_id) {
+//       targetDistributorId = parseInt(req.body.distributor_id);
+//     }
+//     // 2. Check order_for field
+//     else if (order_for && order_for !== "admin") {
+//       if (order_for.startsWith("distributor_")) {
+//         targetDistributorId = parseInt(order_for.replace("distributor_", ""));
+//       } else if (!isNaN(parseInt(order_for))) {
+//         targetDistributorId = parseInt(order_for);
+//       }
+//     }
+
+//     // 3. Fallback to user's linked distributor_code
+//     if (!targetDistributorId) {
+//       const userRes = await client.query(
+//         "SELECT distributor_code FROM ecom_user WHERE id = $1",
+//         [userId],
+//       );
+//       const dCode = userRes.rows[0]?.distributor_code;
+//       if (dCode) {
+//         const dRes = await client.query(
+//           "SELECT id FROM users WHERE referral_code = $1 LIMIT 1",
+//           [dCode],
+//         );
+//         if (dRes.rows.length > 0) {
+//           targetDistributorId = dRes.rows[0].id;
+//         } else if (!isNaN(parseInt(dCode))) {
+//           const dRes2 = await client.query(
+//             "SELECT id FROM users WHERE id = $1 LIMIT 1",
+//             [parseInt(dCode)],
+//           );
+//           if (dRes2.rows.length > 0) {
+//             targetDistributorId = dRes2.rows[0].id;
+//           }
+//         }
+//       }
+//     }
+
+//     // 1. Validate items, calculate totals
+//     let subTotal = 0;
+//     let totalBV = 0;
+//     const validatedItems = [];
+
+//     for (const item of items) {
+//       const { product_id, variation_id: variant_id, quantity: qty } = item;
+
+//       let productData;
+
+//       if (variant_id) {
+//         const variant = await client.query(
+//           `SELECT pv.sku, pv.price, pv.bv_point, pv.stock, p.name as product_name,
+//               p.f_image as product_image,
+//             COALESCE((
+//               SELECT jsonb_agg(
+//                 jsonb_build_object(
+//                   'attr_id', av.attr_id,
+//                   'attr_value_id', vam.attr_value_id,
+//                   'value', av.value
+//                 ) ORDER BY av.attr_id
+//               )
+//               FROM variant_attr_mapping vam
+//               JOIN attr_values av ON vam.attr_value_id = av.id
+//               WHERE vam.variant_id = pv.id
+//             ), '[]'::jsonb) as attributes
+//             FROM pro_variants pv
+//             JOIN products p ON pv.product_id = p.id
+//             WHERE pv.id = $1 AND p.status = 'active'`,
+//           [variant_id],
+//         );
+
+//         productData = variant.rows[0];
+//       } else {
+//         // --- CASE 2: Simple Product (No Variation) ---
+//         const productRes = await client.query(
+//           `SELECT
+//           id::text as sku, -- Fallback to ID if SKU doesn't exist in products table
+//           base_price as price,
+//           null as bv_point,
+//           null as stock,
+//           name as product_name,
+//           f_image as product_image,
+//           '[]'::jsonb as attributes
+//        FROM products
+//        WHERE id = $1 AND status = 'active'`,
+//           [product_id],
+//         );
+//         productData = productRes.rows[0];
+//       }
+
+//       if (!productData) {
+//         throw new Error(
+//           `Product or Variant not found/active: ID ${product_id} ${
+//             variant_id ? "Var " + variant_id : ""
+//           }`,
+//         );
+//       }
+
+//       const itemTotal = parseFloat(productData.price) * qty;
+//       const itemBV = (productData.bv_point || 0) * qty;
+
+//       validatedItems.push({
+//         product_id,
+//         variant_id: variant_id || null,
+//         product_name: productData.product_name,
+//         product_image: productData.product_image,
+//         variant_sku: productData.sku,
+//         variant_details: {
+//           price: productData.price,
+//           bv_point: productData.bv_point,
+//           attributes: productData.attributes || [],
+//         },
+//         qty,
+//         unit_price: productData.price,
+//         unit_bv_points: productData.bv_point,
+//         total_item_price: itemTotal,
+//         total_item_bv: itemBV,
+//       });
+
+//       subTotal += itemTotal;
+//       totalBV += itemBV;
+//     }
+
+//     // Inventory check for distributor orders
+//     if (targetDistributorId) {
+//       for (const item of validatedItems) {
+//         const invRes = await client.query(
+//           `SELECT quantity FROM distributor_inventory
+//            WHERE distributor_id = $1 AND product_id = $2 AND COALESCE(variant_id, 0) = COALESCE($3, 0)`,
+//           [targetDistributorId, item.product_id, item.variant_id],
+//         );
+//         const availableQty = invRes.rows[0]?.quantity || 0;
+//         if (availableQty < item.qty) {
+//           throw new Error(
+//             `Insufficient inventory for ${item.product_name}. Available: ${availableQty}, Required: ${item.qty}`,
+//           );
+//         }
+//       }
+//     }
+
+//     // 2. Tax (simple 18% GST for now, link to tax_settings later)
+//     const taxRate = 0.18;
+//     const taxAmount = subTotal * taxRate;
+
+//     // 3. Shipping (flat 50 for now)
+//     const shippingCharges = 50;
+
+//     // 4. Coupon discount (if provided)
+//     let discount = 0;
+//     if (coupon_code) {
+//       // Reuse coupon logic or simple check
+//       const coupon = await client.query(
+//         "SELECT * FROM coupons WHERE code = $1 AND status = 'active'",
+//         [coupon_code.toUpperCase()],
+//       );
+//       if (coupon.rows[0]) {
+//         // Simplified: fixed/percentage on subTotal
+//         const c = coupon.rows[0];
+//         if (c.discount_type === "percentage") {
+//           discount = (parseFloat(c.discount_amount) / 100) * subTotal;
+//         } else {
+//           discount = parseFloat(c.discount_amount);
+//         }
+//         discount = Math.min(
+//           discount,
+//           parseFloat(c.max_discount_amount || discount),
+//         );
+//       }
+//     }
+
+//     const totalAmount = subTotal + taxAmount + shippingCharges - discount;
+
+//     // 5. Check wallet balance
+//     // const wallet = await client.query(
+//     //   "SELECT COALESCE(total_amount, 0) + COALESCE(pending_amount, 0) as available FROM wallets WHERE user_id = $1",
+//     //   [userId],
+//     // );
+//     // const available = parseFloat(wallet.rows[0]?.available || 0);
+//     // if (available < totalAmount) {
+//     //   throw new Error("Insufficient wallet balance");
+//     // }
+
+//     // 6. Deduct from wallet (total_amount for simplicity)
+//     // await client.query(
+//     //   "UPDATE wallets SET total_amount = total_amount - $1 WHERE user_id = $2",
+//     //   [totalAmount, userId],
+//     // );
+
+//     // 7. Create order
+//     const orderId = generateOrderId();
+//     const newOrder = await client.query(
+//       `INSERT INTO orders (order_id, user_id, distributor_id, sub_total, tax_amount, shipping_charges, total_amount, total_bv_points, shipping_address, payment_method, order_for)
+//        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11) RETURNING *`,
+//       [
+//         orderId,
+//         userId,
+//         targetDistributorId || null,
+//         subTotal,
+//         taxAmount,
+//         shippingCharges,
+//         totalAmount,
+//         totalBV,
+//         shipping_address,
+//         payment_method,
+//         order_for,
+//       ],
+//     );
+
+//     // 8. Create order_items
+//     for (const item of validatedItems) {
+//       await client.query(
+//         `INSERT INTO order_items (order_id, product_id, variant_id, product_name, product_image, variant_sku, variant_details, qty, unit_price, unit_bv_points, total_item_price, total_item_bv)
+//          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)`,
+//         [
+//           newOrder.rows[0].id,
+//           item.product_id,
+//           item.variant_id,
+//           item.product_name,
+//           item.product_image,
+//           item.variant_sku,
+//           item.variant_details,
+//           item.qty,
+//           item.unit_price,
+//           item.unit_bv_points,
+//           item.total_item_price,
+//           item.total_item_bv,
+//         ],
+//       );
+//     }
+
+//     // 9. Auto-decrease distributor inventory for distributor orders
+//     if (targetDistributorId) {
+//       for (const item of validatedItems) {
+//         const updateRes = await client.query(
+//           `UPDATE distributor_inventory
+//            SET quantity = quantity - $1, updated_at = CURRENT_TIMESTAMP
+//            WHERE distributor_id = $2 AND product_id = $3 AND COALESCE(variant_id, 0) = COALESCE($4, 0)
+//            RETURNING *`,
+//           [item.qty, targetDistributorId, item.product_id, item.variant_id],
+//         );
+//         if (updateRes.rowCount === 0) {
+//           throw new Error(
+//             `Inventory record not found for ${item.product_name}. Cannot fulfill order.`,
+//           );
+//         }
+//       }
+//     }
+
+//     await client.query("COMMIT");
+
+//     res.status(200).json({
+//       success: true,
+//       message: "Order placed successfully",
+//       data: { ...newOrder.rows[0], items: validatedItems },
+//     });
+//   } catch (error) {
+//     await client.query("ROLLBACK");
+//     console.error("Order place error:", error);
+//     res.status(400).json({ success: false, message: error.message });
+//   } finally {
+//     client.release();
+//   }
+// };
+
 exports.placeOrder = async (req, res) => {
   const client = await db.connect();
   try {
@@ -15,219 +302,148 @@ exports.placeOrder = async (req, res) => {
 
     const userId = req.user.id;
     const {
-      items, // [{product_id, variant_id, qty}],
+      items, // [{product_id, variation_id, quantity}]
       shipping_address,
       coupon_code,
       payment_method = "wallet",
       order_for = "admin",
+      distributor_id, // Explicitly passed from frontend
     } = req.body;
 
     if (!items || !Array.isArray(items) || items.length === 0) {
-      return res
-        .status(400)
-        .json({ success: false, message: "Items required" });
+      throw new Error("Items required");
     }
 
-    // Determine target distributor for inventory management
-    let targetDistributorId = null;
+    // 1. Target Distributor Identify karein (Fallback Logic)
+    let targetDistributorId = distributor_id ? parseInt(distributor_id) : 0;
+    // Default to 0 (Main Warehouse) if nothing is provided
 
-    // 1. Check explicit distributor_id in request
-    if (req.body.distributor_id) {
-      targetDistributorId = parseInt(req.body.distributor_id);
-    }
-    // 2. Check order_for field
-    else if (order_for && order_for !== "admin") {
-      if (order_for.startsWith("distributor_")) {
-        targetDistributorId = parseInt(order_for.replace("distributor_", ""));
-      } else if (!isNaN(parseInt(order_for))) {
-        targetDistributorId = parseInt(order_for);
-      }
-    }
-
-    // 3. Fallback to user's linked distributor_code
-    if (!targetDistributorId) {
-      const userRes = await client.query(
-        "SELECT distributor_code FROM ecom_user WHERE id = $1",
-        [userId],
-      );
-      const dCode = userRes.rows[0]?.distributor_code;
-      if (dCode) {
-        const dRes = await client.query(
-          "SELECT id FROM users WHERE referral_code = $1 LIMIT 1",
-          [dCode],
-        );
-        if (dRes.rows.length > 0) {
-          targetDistributorId = dRes.rows[0].id;
-        } else if (!isNaN(parseInt(dCode))) {
-          const dRes2 = await client.query(
-            "SELECT id FROM users WHERE id = $1 LIMIT 1",
-            [parseInt(dCode)],
-          );
-          if (dRes2.rows.length > 0) {
-            targetDistributorId = dRes2.rows[0].id;
-          }
-        }
-      }
-    }
-
-    // 1. Validate items, calculate totals
     let subTotal = 0;
+    let totalTax = 0; // Dynamic Tax Accumulator
     let totalBV = 0;
     const validatedItems = [];
 
+    // 2. Validate Items & Fetch Prices
     for (const item of items) {
-      const { product_id, variation_id: variant_id, quantity: qty } = item;
+      const { product_id, variation_id, quantity: qty } = item;
 
-      let productData;
+      // const productQuery = variation_id
+      //   ? `SELECT pv.sku, pv.price, pv.bv_point, p.name as product_name, p.f_image ,
+      //   CASE
+      //     WHEN p.tax_id IS NOT NULL THEN
+      //       jsonb_build_object(
+      //         'id', t.id,
+      //         'name', t.tax_name,
+      //         'percentage', t.tax_percentage
+      //       )
+      //     ELSE NULL
+      //   END AS tax_data
+      //    FROM pro_variants pv
+      //    JOIN products p ON pv.product_id = p.id
+      //    LEFT JOIN tax_settings t ON p.tax_id = t.id
+      //    WHERE pv.id = $1 AND p.status = 'active'`
+      //   : `SELECT
+      //         p.id::text as sku,
+      //         p.base_price as price,
+      //         COALESCE(p.bv_point, 0) as bv_point, -- Product level BV (with fallback to 0)
+      //         p.name as product_name,
+      //         p.f_image,
+      //         CASE
+      //           WHEN p.tax_id IS NOT NULL THEN
+      //             jsonb_build_object(
+      //               'id', t.id,
+      //               'name', t.tax_name,
+      //               'percentage', t.tax_percentage
+      //             )
+      //           ELSE NULL
+      //         END AS tax_data
+      //     FROM products p
+      //     LEFT JOIN tax_settings t ON p.tax_id = t.id
+      //     WHERE p.id = $1 AND p.status = 'active'`;
 
-      if (variant_id) {
-        const variant = await client.query(
-          `SELECT pv.sku, pv.price, pv.bv_point, pv.stock, p.name as product_name, 
-              p.f_image as product_image,
-            COALESCE((
-              SELECT jsonb_agg(
-                jsonb_build_object(
-                  'attr_id', av.attr_id,
-                  'attr_value_id', vam.attr_value_id, 
-                  'value', av.value
-                ) ORDER BY av.attr_id
-              )
-              FROM variant_attr_mapping vam
-              JOIN attr_values av ON vam.attr_value_id = av.id 
-              WHERE vam.variant_id = pv.id
-            ), '[]'::jsonb) as attributes
-            FROM pro_variants pv 
-            JOIN products p ON pv.product_id = p.id 
-            WHERE pv.id = $1 AND p.status = 'active'`,
-          [variant_id],
-        );
+      const productQuery = variation_id
+        ? `SELECT pv.sku, pv.price, pv.bv_point, p.name as product_name, p.f_image, t.tax_percentage
+           FROM pro_variants pv 
+           JOIN products p ON pv.product_id = p.id 
+           LEFT JOIN tax_settings t ON p.tax_id = t.id
+           WHERE pv.id = $1 AND p.status = 'active'`
+        : `SELECT p.id::text as sku, p.base_price as price, COALESCE(p.bv_point, 0) as bv_point, 
+           p.name as product_name, p.f_image, t.tax_percentage
+           FROM products p
+           LEFT JOIN tax_settings t ON p.tax_id = t.id
+           WHERE p.id = $1 AND p.status = 'active'`;
 
-        productData = variant.rows[0];
+      const pRes = await client.query(productQuery, [
+        variation_id || product_id,
+      ]);
+      const productData = pRes.rows[0];
+
+      if (!productData)
+        throw new Error(`Product/Variant ${product_id} not active.`);
+
+      // --- INVENTORY CHECK WITH FALLBACK (ID: distributor_id OR 0) ---
+      const invRes = await client.query(
+        `SELECT distributor_id, quantity FROM distributor_inventory 
+         WHERE product_id = $1 AND (variant_id = $2 OR (variant_id IS NULL AND $2 IS NULL))
+         AND (distributor_id = $3 OR distributor_id = 0)
+         ORDER BY (distributor_id = $3) DESC`, // Taaki specific distributor pehle aaye
+        [product_id, variation_id || null, targetDistributorId],
+      );
+
+      // Check Specific Distributor first, then Main Warehouse
+      let specificDistStock = invRes.rows.find(
+        (r) => r.distributor_id == targetDistributorId,
+      );
+      let mainWarehouseStock = invRes.rows.find((r) => r.distributor_id == 0);
+
+      let finalStockSource = null;
+
+      if (specificDistStock && specificDistStock.quantity >= qty) {
+        finalStockSource = targetDistributorId;
+      } else if (mainWarehouseStock && mainWarehouseStock.quantity >= qty) {
+        finalStockSource = 0;
       } else {
-        // --- CASE 2: Simple Product (No Variation) ---
-        const productRes = await client.query(
-          `SELECT 
-          id::text as sku, -- Fallback to ID if SKU doesn't exist in products table
-          base_price as price, 
-          null as bv_point, 
-          null as stock, 
-          name as product_name, 
-          f_image as product_image, 
-          '[]'::jsonb as attributes
-       FROM products 
-       WHERE id = $1 AND status = 'active'`,
-          [product_id],
-        );
-        productData = productRes.rows[0];
+        throw new Error(`Insufficient stock for ${productData.product_name}.`);
       }
 
-      if (!productData) {
-        throw new Error(
-          `Product or Variant not found/active: ID ${product_id} ${
-            variant_id ? "Var " + variant_id : ""
-          }`,
-        );
-      }
-
-      const itemTotal = parseFloat(productData.price) * qty;
+      const price = parseFloat(productData.price);
+      const taxPercent = parseFloat(productData.tax_percentage || 0);
+      const itemTax = ((price * taxPercent) / 100) * qty;
+      const itemTotal = price * qty;
       const itemBV = (productData.bv_point || 0) * qty;
 
       validatedItems.push({
         product_id,
-        variant_id: variant_id || null,
-        product_name: productData.product_name,
-        product_image: productData.product_image,
-        variant_sku: productData.sku,
-        variant_details: {
-          price: productData.price,
-          bv_point: productData.bv_point,
-          attributes: productData.attributes || [],
-        },
+        variant_id: variation_id || null,
         qty,
         unit_price: productData.price,
-        unit_bv_points: productData.bv_point,
         total_item_price: itemTotal,
         total_item_bv: itemBV,
+        stock_source: finalStockSource, // Track kahan se stock katna hai
+        product_name: productData.product_name,
+        product_image: productData.f_image,
       });
 
       subTotal += itemTotal;
+      totalTax += itemTax; // Add to global order tax
       totalBV += itemBV;
     }
 
-    // Inventory check for distributor orders
-    if (targetDistributorId) {
-      for (const item of validatedItems) {
-        const invRes = await client.query(
-          `SELECT quantity FROM distributor_inventory
-           WHERE distributor_id = $1 AND product_id = $2 AND COALESCE(variant_id, 0) = COALESCE($3, 0)`,
-          [targetDistributorId, item.product_id, item.variant_id],
-        );
-        const availableQty = invRes.rows[0]?.quantity || 0;
-        if (availableQty < item.qty) {
-          throw new Error(
-            `Insufficient inventory for ${item.product_name}. Available: ${availableQty}, Required: ${item.qty}`,
-          );
-        }
-      }
-    }
-
-    // 2. Tax (simple 18% GST for now, link to tax_settings later)
-    const taxRate = 0.18;
-    const taxAmount = subTotal * taxRate;
-
-    // 3. Shipping (flat 50 for now)
+    // 3. Tax & Shipping (Simple Logic)
     const shippingCharges = 50;
+    const taxAmount = Math.round(totalTax * 100) / 100;
+    const totalAmount = subTotal + taxAmount + shippingCharges;
 
-    // 4. Coupon discount (if provided)
-    let discount = 0;
-    if (coupon_code) {
-      // Reuse coupon logic or simple check
-      const coupon = await client.query(
-        "SELECT * FROM coupons WHERE code = $1 AND status = 'active'",
-        [coupon_code.toUpperCase()],
-      );
-      if (coupon.rows[0]) {
-        // Simplified: fixed/percentage on subTotal
-        const c = coupon.rows[0];
-        if (c.discount_type === "percentage") {
-          discount = (parseFloat(c.discount_amount) / 100) * subTotal;
-        } else {
-          discount = parseFloat(c.discount_amount);
-        }
-        discount = Math.min(
-          discount,
-          parseFloat(c.max_discount_amount || discount),
-        );
-      }
-    }
-
-    const totalAmount = subTotal + taxAmount + shippingCharges - discount;
-
-    // 5. Check wallet balance
-    // const wallet = await client.query(
-    //   "SELECT COALESCE(total_amount, 0) + COALESCE(pending_amount, 0) as available FROM wallets WHERE user_id = $1",
-    //   [userId],
-    // );
-    // const available = parseFloat(wallet.rows[0]?.available || 0);
-    // if (available < totalAmount) {
-    //   throw new Error("Insufficient wallet balance");
-    // }
-
-    // 6. Deduct from wallet (total_amount for simplicity)
-    // await client.query(
-    //   "UPDATE wallets SET total_amount = total_amount - $1 WHERE user_id = $2",
-    //   [totalAmount, userId],
-    // );
-
-    // 7. Create order
-    const orderId = generateOrderId();
-    const newOrder = await client.query(
-      `INSERT INTO orders (order_id, user_id, distributor_id, sub_total, tax_amount, shipping_charges, total_amount, total_bv_points, shipping_address, payment_method, order_for)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11) RETURNING *`,
+    // 4. Create Order
+    const orderRef = generateOrderId();
+    const orderInsert = await client.query(
+      `INSERT INTO orders (order_id, user_id, distributor_id, sub_total, 
+      tax_amount, shipping_charges, total_amount, total_bv_points, shipping_address, payment_method, order_status)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, 'pending') RETURNING id`,
       [
-        orderId,
+        orderRef,
         userId,
-        targetDistributorId || null,
+        targetDistributorId,
         subTotal,
         taxAmount,
         shippingCharges,
@@ -235,60 +451,77 @@ exports.placeOrder = async (req, res) => {
         totalBV,
         shipping_address,
         payment_method,
-        order_for,
       ],
     );
+    const dbOrderId = orderInsert.rows[0].id;
 
-    // 8. Create order_items
+    // 5. Insert Items & UPDATE INVENTORY (Deduction)
     for (const item of validatedItems) {
+      // Order Item Insert
+      // await client.query(
+      //   `INSERT INTO order_items (order_id, product_id, variant_id, product_name, qty, unit_price, total_item_price, stock_source)
+      //    VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+      //   [
+      //     dbOrderId,
+      //     item.product_id,
+      //     item.variant_id,
+      //     item.product_name,
+      //     item.qty,
+      //     item.unit_price,
+      //     item.total_item_price,
+      //     item.stock_source,
+      //   ],
+      // );
       await client.query(
-        `INSERT INTO order_items (order_id, product_id, variant_id, product_name, product_image, variant_sku, variant_details, qty, unit_price, unit_bv_points, total_item_price, total_item_bv)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)`,
+        `INSERT INTO order_items (
+        order_id, product_id, variant_id, product_name, 
+        qty, unit_price, unit_bv_points, total_item_price, 
+        total_item_bv, stock_source, product_image
+     )
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`,
         [
-          newOrder.rows[0].id,
+          dbOrderId,
           item.product_id,
           item.variant_id,
           item.product_name,
-          item.product_image,
-          item.variant_sku,
-          item.variant_details,
           item.qty,
           item.unit_price,
-          item.unit_bv_points,
+          item.unit_bv_points || 0, // unit_bv_points handle kiya
           item.total_item_price,
-          item.total_item_bv,
+          item.total_item_bv || 0, // total_item_bv handle kiya (Error Fix)
+          item.stock_source,
+          item.product_image,
         ],
       );
+
+      // Inventory Deduct (Use finalStockSource identified earlier)
+      const deductRes = await client.query(
+        `UPDATE distributor_inventory 
+         SET quantity = quantity - $1, updated_at = CURRENT_TIMESTAMP
+         WHERE product_id = $2 AND (variant_id = $3 OR (variant_id IS NULL AND $3 IS NULL))
+         AND distributor_id = $4 RETURNING quantity`,
+        [item.qty, item.product_id, item.variant_id, item.stock_source],
+      );
+
+      if (deductRes.rowCount === 0)
+        throw new Error(`Inventory update failed for ${item.product_name}`);
     }
 
-    // 9. Auto-decrease distributor inventory for distributor orders
-    if (targetDistributorId) {
-      for (const item of validatedItems) {
-        const updateRes = await client.query(
-          `UPDATE distributor_inventory
-           SET quantity = quantity - $1, updated_at = CURRENT_TIMESTAMP
-           WHERE distributor_id = $2 AND product_id = $3 AND COALESCE(variant_id, 0) = COALESCE($4, 0)
-           RETURNING *`,
-          [item.qty, targetDistributorId, item.product_id, item.variant_id],
-        );
-        if (updateRes.rowCount === 0) {
-          throw new Error(
-            `Inventory record not found for ${item.product_name}. Cannot fulfill order.`,
-          );
-        }
-      }
-    }
+    // 6. Optional: Clear Cart after success
+    await client.query(
+      `DELETE FROM e_cart_items WHERE cart_id = (SELECT id FROM e_carts WHERE user_id = $1)`,
+      [userId],
+    );
 
     await client.query("COMMIT");
-
     res.status(200).json({
       success: true,
       message: "Order placed successfully",
-      data: { ...newOrder.rows[0], items: validatedItems },
+      order_id: orderRef,
     });
   } catch (error) {
     await client.query("ROLLBACK");
-    console.error("Order place error:", error);
+    console.error("Order Place Error:", error.message);
     res.status(400).json({ success: false, message: error.message });
   } finally {
     client.release();
@@ -296,31 +529,106 @@ exports.placeOrder = async (req, res) => {
 };
 
 // User/Admin: Get my orders
+// exports.getMyOrders = async (req, res) => {
+//   try {
+//     const userId = req.user.id;
+//     const { page = 1, limit = 10, status } = req.query;
+//     const offset = (parseInt(page) - 1) * parseInt(limit);
+
+//     // Initial parameters
+//     const params = [userId];
+//     let whereClause = "WHERE o.user_id = $1";
+
+//     if (status) {
+//       params.push(status);
+//       whereClause += ` AND o.order_status = $${params.length}`;
+//     }
+
+//     // Main Query
+//     const ordersQuery = `
+//       SELECT o.*,
+//              COUNT(oi.id)::int as items_count,
+//              COALESCE(SUM(oi.total_item_price), 0) as items_total,
+//              oi.product_name, oi.product_image
+//       FROM orders o
+//       LEFT JOIN order_items oi ON o.id = oi.order_id
+//       ${whereClause}
+//       GROUP BY o.id, oi.product_name, oi.product_image
+//       ORDER BY o.created_at DESC
+//       LIMIT $${params.length + 1} OFFSET $${params.length + 2}
+//     `;
+
+//     const orders = await db.query(ordersQuery, [
+//       ...params,
+//       parseInt(limit),
+//       offset,
+//     ]);
+
+//     // Error Fix Here: Added "o" alias to orders table
+//     const countWhereClause = whereClause.replace(/o\./g, ""); // "o." hata diya kyunki yahan alias ki zaroorat nahi agar single table hai
+//     // YA phir alias de do:
+//     const totalRes = await db.query(
+//       `SELECT COUNT(*)::int FROM orders o ${whereClause}`, // Added "o" here
+//       params,
+//     );
+
+//     res.json({
+//       success: true,
+//       data: orders.rows,
+//       total: totalRes.rows[0].count, // Frontend compatibility ke liye
+//       page: parseInt(page),
+//       limit: parseInt(limit),
+//       pagination: {
+//         page: parseInt(page),
+//         limit: parseInt(limit),
+//         total: totalRes.rows[0].count,
+//         pages: Math.ceil(totalRes.rows[0].count / parseInt(limit)),
+//       },
+//     });
+//   } catch (error) {
+//     console.error(error);
+//     res.status(500).json({ success: false, message: "Server error" });
+//   }
+// };
+
 exports.getMyOrders = async (req, res) => {
   try {
     const userId = req.user.id;
     const { page = 1, limit = 10, status } = req.query;
     const offset = (parseInt(page) - 1) * parseInt(limit);
 
-    // Initial parameters
     const params = [userId];
     let whereClause = "WHERE o.user_id = $1";
 
     if (status) {
       params.push(status);
-      whereClause += ` AND o.order_status = $${params.length}`;
+      // Ensure column name matches your DB (usually 'status' or 'order_status')
+      whereClause += ` AND o.status = $${params.length}`;
     }
 
-    // Main Query
     const ordersQuery = `
-      SELECT o.*, 
-             COUNT(oi.id)::int as items_count,
-             COALESCE(SUM(oi.total_item_price), 0) as items_total,
-             oi.product_name, oi.product_image
+      SELECT 
+        o.*, 
+        COALESCE(
+          (SELECT jsonb_agg(items_json)
+           FROM (
+             SELECT 
+               oi.id, 
+               oi.product_id, 
+               oi.variant_id, 
+               oi.product_name, 
+               oi.product_image, 
+               oi.qty, 
+               oi.unit_price, 
+               oi.total_item_price
+             FROM order_items oi
+             WHERE oi.order_id = o.id
+           ) items_json
+          ), '[]'::jsonb
+        ) AS items,
+        (SELECT COUNT(*)::int FROM order_items WHERE order_id = o.id) as total_items_count
       FROM orders o 
-      LEFT JOIN order_items oi ON o.id = oi.order_id
       ${whereClause}
-      GROUP BY o.id, oi.product_name, oi.product_image
       ORDER BY o.created_at DESC 
       LIMIT $${params.length + 1} OFFSET $${params.length + 2}
     `;
@@ -331,29 +639,25 @@ exports.getMyOrders = async (req, res) => {
       offset,
     ]);
 
-    // Error Fix Here: Added "o" alias to orders table
-    const countWhereClause = whereClause.replace(/o\./g, ""); // "o." hata diya kyunki yahan alias ki zaroorat nahi agar single table hai
-    // YA phir alias de do:
     const totalRes = await db.query(
-      `SELECT COUNT(*)::int FROM orders o ${whereClause}`, // Added "o" here
+      `SELECT COUNT(*)::int FROM orders o ${whereClause}`,
       params,
     );
+
+    const totalCount = totalRes.rows[0].count;
 
     res.json({
       success: true,
       data: orders.rows,
-      total: totalRes.rows[0].count, // Frontend compatibility ke liye
-      page: parseInt(page),
-      limit: parseInt(limit),
       pagination: {
+        total: totalCount,
         page: parseInt(page),
         limit: parseInt(limit),
-        total: totalRes.rows[0].count,
-        pages: Math.ceil(totalRes.rows[0].count / parseInt(limit)),
+        pages: Math.ceil(totalCount / parseInt(limit)),
       },
     });
   } catch (error) {
-    console.error(error);
+    console.error("Get My Orders Error:", error);
     res.status(500).json({ success: false, message: "Server error" });
   }
 };

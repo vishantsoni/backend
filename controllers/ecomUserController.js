@@ -230,30 +230,49 @@ exports.updateAddress = async (req, res) => {
     const userId = req.user.id;
     const { id } = req.params;
     const fields = req.body;
+
+    // 1. Filter out keys that shouldn't be updated or are empty
+    const keys = Object.keys(fields).filter(
+      (key) => key !== "id" && key !== "user_id",
+    );
+
+    if (keys.length === 0) {
+      return res
+        .status(400)
+        .json({ status: false, error: "No fields provided for update" });
+    }
+
     const updates = [];
     const values = [];
-    let paramIndex = 1;
 
-    Object.keys(fields).forEach((key) => {
-      updates.push(`${key} = $${paramIndex + 1}`);
+    // 2. Build dynamic updates
+    keys.forEach((key, index) => {
+      // index starts at 0, so we use index + 1 for $1, $2, etc.
+      updates.push(`${key} = $${index + 1}`);
       values.push(fields[key]);
-      paramIndex++;
     });
 
-    values.unshift(userId, id);
+    // 3. Add userId and id at the end of the values array
+    const nextIndex = values.length + 1; // Position for userId
+    const lastIndex = values.length + 2; // Position for id
+    values.push(userId, id);
+
     const query = `
       UPDATE e_user_addresses 
       SET ${updates.join(", ")}, updated_at = CURRENT_TIMESTAMP
-      WHERE user_id = $1 AND id = $2 RETURNING *
+      WHERE user_id = $${nextIndex} AND id = $${lastIndex} 
+      RETURNING *
     `;
 
     const result = await db.query(query, values);
-    if (result.rows.length === 0)
+
+    if (result.rows.length === 0) {
       return res
         .status(404)
         .json({ status: false, error: "Address not found" });
+    }
 
-    // Handle default
+    // 4. Handle default logic
     if (fields.is_default === true) {
       await db.query(
         "UPDATE e_user_addresses SET is_default = false WHERE user_id = $1 AND id != $2",

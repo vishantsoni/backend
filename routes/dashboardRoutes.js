@@ -4,9 +4,11 @@ const {
   getDashboardData,
   getUserDashboardData,
   getAnalytics,
+  getEcomDashboardData,
 } = require("../controllers/dashboardController");
 const authMiddleware = require("../middleware/authMiddleware");
 const isAdminOrSuperAdmin = require("../middleware/isAdminOrSuperAdmin");
+const ecomAuth = require("../middleware/ecomAuth");
 
 // @route   GET api/dashboard/me
 // @desc    Get user/distributor personal dashboard data
@@ -22,5 +24,8 @@ router.get("/", authMiddleware, isAdminOrSuperAdmin, getDashboardData);
 // @desc    Get MLM analytics metrics (Total Referrals, Active Downline, Commissions, Conversion Rate)
 // @access  Admin/SuperAdmin
 router.get("/analytics", authMiddleware, getAnalytics);
+
+// dashboard for ecom-user
+router.get("/ecom/me", ecomAuth, getEcomDashboardData);
 
 module.exports = router;

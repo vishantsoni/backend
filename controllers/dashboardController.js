@@ -182,6 +182,54 @@ exports.getUserDashboardData = async (req, res) => {
   }
 };
 
+// @desc    Get Ecom-user Dashboard Data (Total Orders, Open Tickets, Total Order Value)
+// @route   GET /api/dashboard/ecom/me
+exports.getEcomDashboardData = async (req, res) => {
+  try {
+    const userId = req.user.id;
+
+    // Total Orders + Total Order Value
+    const orderAgg = await safeQuery(
+      `
+      SELECT
+        COUNT(*)::int as total_orders,
+        COALESCE(SUM(total_amount), 0)::numeric(12,2) as total_order_value
+      FROM orders
+      WHERE user_id = $1
+      `,
+      [userId],
+      [{}],
+    );
+
+    console.log("user id - ", userId, orderAgg);
+    // Open Tickets (not CLOSED/RESOLVED)
+    const ticketAgg = await safeQuery(
+      `
+      SELECT
+        COUNT(*)::int as open_tickets
+      FROM tickets
+      WHERE ecom_user_id = $1
+        AND status NOT IN ('CLOSED', 'RESOLVED')
+      `,
+      [userId],
+      [{}],
+    );
+
+    return res.json({
+      success: true,
+      data: {
+        total_orders: orderAgg.data?.[0]?.total_orders ?? 0,
+        open_tickets: ticketAgg.data?.[0]?.open_tickets ?? 0,
+        total_order_value: Number(orderAgg.data?.[0]?.total_order_value ?? 0),
+      },
+      message: "Ecom dashboard data fetched successfully",
+    });
+  } catch (error) {
+    console.error("Error fetching ecom dashboard data:", error);
+    res.status(500).json({ success: false, message: "Server error" });
+  }
+};
+
 // @desc    Get Admin Dashboard Data
 // @route   GET /api/dashboard
 exports.getDashboardData = async (req, res) => {

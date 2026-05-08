@@ -163,6 +163,7 @@ exports.getProducts = async (req, res) => {
         p.*, 
         c.name as category_name,        
         COUNT(v.id) AS variant_count,
+        COALESCE(SUM(inv.quantity), 0) AS total_stock,
         -- New taxable_price index (Base Price + Tax)
         ROUND(p.base_price * (1 + COALESCE(t.tax_percentage, 0) / 100.0), 2) AS taxable_price,
         -- Tax Data JSON
@@ -179,6 +180,9 @@ exports.getProducts = async (req, res) => {
       LEFT JOIN pro_variants v ON p.id = v.product_id
       JOIN categories c ON p.cat_id = c.id
       LEFT JOIN tax_settings t ON p.tax_id = t.id
+      LEFT JOIN distributor_inventory inv ON 
+      inv.product_id = p.id AND 
+      (inv.variant_id = v.id OR (inv.variant_id IS NULL AND v.id IS NULL))
       ${whereClause}
       -- Added t.tax_percentage to GROUP BY to allow price calculation
       GROUP BY p.id, c.name, t.id, t.tax_name, t.tax_percentage
@@ -341,6 +345,7 @@ exports.createProduct = async (req, res) => {
     const {
       name,
       description,
+      short_desc,
       price,
       discounted_price,
       cat_id,
@@ -404,12 +409,13 @@ exports.createProduct = async (req, res) => {
     const basePrice = parseFloat(price) || 0;
     const b_discounted_price = parseFloat(discounted_price) || 0;
     const result = await db.query(
-      `INSERT INTO products (cat_id, name, description, f_image, g_image, status, tax_id, base_price, subcategories, attributes, discounted_price, slug) 
+      `INSERT INTO products (cat_id, name, description, short_desc, f_image, g_image, status, tax_id, base_price, subcategories, attributes, discounted_price, slug) 
        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12) RETURNING *`,
       [
         cat_id || null,
         name.trim(),
         description || null,
+        short_desc || null,
         fImagePath,
         gImagePaths,
         status || "active",
@@ -765,15 +771,294 @@ exports.getProductById = async (req, res) => {
   }
 };
 
+// exports.getProductByslug = async (req, res) => {
+//   try {
+//     const { slug } = req.params;
+//     const { distributor_id } = req.query;
+//     if (!slug || typeof slug !== "string" || slug.trim().length === 0) {
+//       return res.status(400).json({
+//         success: false,
+//         message: "Valid slug is required",
+//       });
+//     }
+
+//     const result = await db.query(
+//       `
+//       SELECT
+//     jsonb_build_object(
+//       'id', p.id,
+//       'cat_id', p.cat_id,
+//       'name', p.name,
+//       'description', p.description,
+//       'slug', p.slug,
+//       'f_image', p.f_image,
+//       'g_image', p.g_image,
+//       'tax_id', p.tax_id,
+//       'base_price', ROUND(p.base_price * (1 + COALESCE(t.tax_percentage, 0) / 100.0), 2),
+//       'discounted_price', ROUND(COALESCE(p.discounted_price, p.base_price) * (1 + COALESCE(t.tax_percentage, 0) / 100.0), 2),
+//       'status', p.status,
+//       'created_at', p.created_at,
+//       -- Global Stock (Product level par total stock)
+//       'total_stock', COALESCE((SELECT SUM(quantity) FROM distributor_inventory WHERE product_id = p.id), 0)
+//     ) AS product,
+
+//     jsonb_build_object(
+//       'id', c.id,
+//       'name', c.name,
+//       'slug', c.slug
+//     ) AS category,
+
+//     CASE
+//       WHEN p.tax_id IS NOT NULL THEN
+//         jsonb_build_object(
+//           'id', t.id,
+//           'name', t.tax_name,
+//           'percentage', t.tax_percentage
+//         )
+//       ELSE NULL
+//     END AS tax_data,
+
+//     COALESCE((
+//       SELECT jsonb_agg(jsonb_build_object('id', sc.id, 'name', sc.name, 'slug', sc.slug))
+//       FROM categories sc WHERE sc.id = ANY(p.subcategories)
+//     ), '[]'::jsonb) AS subcategories,
+
+//     COALESCE((
+//       SELECT jsonb_agg(
+//         jsonb_build_object(
+//           'id', a.id,
+//           'name', a.name,
+//           'values', COALESCE((
+//             SELECT jsonb_agg(jsonb_build_object('id', av.id, 'value', av.value))
+//             FROM attr_values av WHERE av.attr_id = a.id
+//           ), '[]'::jsonb)
+//         )
+//       )
+//       FROM attributes a WHERE a.id = ANY(p.attributes)
+//     ), '[]'::jsonb) AS product_attributes,
+
+//     -- Variants with Inventory Fix
+//     COALESCE((
+//       SELECT jsonb_agg(
+//         jsonb_build_object(
+//           'id', v.id,
+//           'sku', v.sku,
+//           'base_price', v.price,
+//           'price', ROUND(v.price * (1 + COALESCE(t.tax_percentage, 0) / 100.0), 2),
+//           'bv_point', v.bv_point,
+//           -- Variant level inventory calculation
+//           'inventory_stock', COALESCE((
+//               SELECT SUM(quantity)
+//               FROM distributor_inventory
+//               WHERE product_id = p.id AND variant_id = v.id
+//           ), 0),
+//           'attr_combinations', COALESCE((
+//             SELECT jsonb_agg(
+//               jsonb_build_object(
+//                 'attr_value_id', vam.attr_value_id,
+//                 'attr_id', av.attr_id,
+//                 'value', av.value
+//               ) ORDER BY av.attr_id
+//             )
+//             FROM variant_attr_mapping vam
+//             JOIN attr_values av ON vam.attr_value_id = av.id
+//             WHERE vam.variant_id = v.id
+//           ), '[]'::jsonb)
+//         )
+//       )
+//       FROM pro_variants v
+//       WHERE v.product_id = p.id
+//     ), '[]'::jsonb) AS variants,
+
+//     COUNT(v2.id) AS variant_count
+
+// FROM products p
+// LEFT JOIN categories c ON p.cat_id = c.id
+// LEFT JOIN pro_variants v2 ON p.id = v2.product_id
+// LEFT JOIN tax_settings t ON p.tax_id = t.id
+// WHERE p.slug = $1
+// GROUP BY p.id, c.id, t.id, t.tax_name, t.tax_percentage;
+//     `,
+//       [slug],
+//     );
+
+//     if (result.rows.length === 0) {
+//       return res.status(404).json({
+//         success: false,
+//         message: "Product not found",
+//       });
+//     }
+
+//     res.status(200).json({
+//       success: true,
+//       message: "Product fetched successfully with tax-inclusive prices",
+//       data: result.rows[0],
+//     });
+//   } catch (error) {
+//     console.error("Error fetching product by slug:", error);
+//     res.status(500).json({
+//       success: false,
+//       message: "Internal server error",
+//       error: error.message,
+//     });
+//   }
+// };
+
+// exports.getProductByslug = async (req, res) => {
+//   try {
+//     const { slug } = req.params;
+//     const { distributor_id } = req.query; // Query parameter se fetch kiya
+
+//     if (!slug || typeof slug !== "string" || slug.trim().length === 0) {
+//       return res.status(400).json({
+//         success: false,
+//         message: "Valid slug is required",
+//       });
+//     }
+
+//     // Distributor ID ko handle karne ke liye integer conversion
+//     const dId = distributor_id ? parseInt(distributor_id) : null;
+
+//     const result = await db.query(
+//       `
+//       SELECT
+//         jsonb_build_object(
+//           'id', p.id,
+//           'cat_id', p.cat_id,
+//           'name', p.name,
+//           'description', p.description,
+//           'slug', p.slug,
+//           'f_image', p.f_image,
+//           'g_image', p.g_image,
+//           'tax_id', p.tax_id,
+//           'base_price', ROUND(p.base_price * (1 + COALESCE(t.tax_percentage, 0) / 100.0), 2),
+//           'discounted_price', ROUND(COALESCE(p.discounted_price, p.base_price) * (1 + COALESCE(t.tax_percentage, 0) / 100.0), 2),
+//           'status', p.status,
+//           'created_at', p.created_at,
+//           -- Stock mapping with optional distributor_id filter
+//           'total_stock', COALESCE((
+//               SELECT SUM(quantity)
+//               FROM distributor_inventory
+//               WHERE product_id = p.id
+//               AND ($2::int IS NULL OR distributor_id = $2::int)
+//           ), 0)
+//         ) AS product,
+
+//         jsonb_build_object(
+//           'id', c.id,
+//           'name', c.name,
+//           'slug', c.slug
+//         ) AS category,
+
+//         CASE
+//           WHEN p.tax_id IS NOT NULL THEN
+//             jsonb_build_object(
+//               'id', t.id,
+//               'name', t.tax_name,
+//               'percentage', t.tax_percentage
+//             )
+//           ELSE NULL
+//         END AS tax_data,
+
+//         COALESCE((
+//           SELECT jsonb_agg(jsonb_build_object('id', sc.id, 'name', sc.name, 'slug', sc.slug))
+//           FROM categories sc WHERE sc.id = ANY(p.subcategories)
+//         ), '[]'::jsonb) AS subcategories,
+
+//         COALESCE((
+//           SELECT jsonb_agg(
+//             jsonb_build_object(
+//               'id', a.id,
+//               'name', a.name,
+//               'values', COALESCE((
+//                 SELECT jsonb_agg(jsonb_build_object('id', av.id, 'value', av.value))
+//                 FROM attr_values av WHERE av.attr_id = a.id
+//               ), '[]'::jsonb)
+//             )
+//           )
+//           FROM attributes a WHERE a.id = ANY(p.attributes)
+//         ), '[]'::jsonb) AS product_attributes,
+
+//         -- Variants with conditional inventory
+//         COALESCE((
+//           SELECT jsonb_agg(
+//             jsonb_build_object(
+//               'id', v.id,
+//               'sku', v.sku,
+//               'base_price', v.price,
+//               'price', ROUND(v.price * (1 + COALESCE(t.tax_percentage, 0) / 100.0), 2),
+//               'bv_point', v.bv_point,
+//               'inventory_stock', COALESCE((
+//                   SELECT SUM(quantity)
+//                   FROM distributor_inventory
+//                   WHERE product_id = p.id
+//                   AND variant_id = v.id
+//                   AND ($2::int IS NULL OR distributor_id = $2::int)
+//               ), 0),
+//               'attr_combinations', COALESCE((
+//                 SELECT jsonb_agg(
+//                   jsonb_build_object(
+//                     'attr_value_id', vam.attr_value_id,
+//                     'attr_id', av.attr_id,
+//                     'value', av.value
+//                   ) ORDER BY av.attr_id
+//                 )
+//                 FROM variant_attr_mapping vam
+//                 JOIN attr_values av ON vam.attr_value_id = av.id
+//                 WHERE vam.variant_id = v.id
+//               ), '[]'::jsonb)
+//             )
+//           )
+//           FROM pro_variants v
+//           WHERE v.product_id = p.id
+//         ), '[]'::jsonb) AS variants,
+
+//         COUNT(v2.id) AS variant_count
+
+//       FROM products p
+//       LEFT JOIN categories c ON p.cat_id = c.id
+//       LEFT JOIN pro_variants v2 ON p.id = v2.product_id
+//       LEFT JOIN tax_settings t ON p.tax_id = t.id
+//       WHERE p.slug = $1
+//       GROUP BY p.id, c.id, t.id, t.tax_name, t.tax_percentage;
+//     `,
+//       [slug, dId], // Slug as $1, dId as $2
+//     );
+
+//     if (result.rows.length === 0) {
+//       return res.status(404).json({
+//         success: false,
+//         message: "Product not found",
+//       });
+//     }
+
+//     res.status(200).json({
+//       success: true,
+//       message: "Product fetched successfully",
+//       data: result.rows[0],
+//     });
+//   } catch (error) {
+//     console.error("Error fetching product by slug:", error);
+//     res.status(500).json({
+//       success: false,
+//       message: "Internal server error",
+//     });
+//   }
+// };
+
 exports.getProductByslug = async (req, res) => {
   try {
     const { slug } = req.params;
+    const { distributor_id } = req.query;
+
     if (!slug || typeof slug !== "string" || slug.trim().length === 0) {
       return res.status(400).json({
         success: false,
         message: "Valid slug is required",
       });
     }
+
+    const dId = distributor_id ? parseInt(distributor_id) : null;
 
     const result = await db.query(
       `
@@ -787,13 +1072,21 @@ exports.getProductByslug = async (req, res) => {
           'f_image', p.f_image,
           'g_image', p.g_image,
           'tax_id', p.tax_id,
-          -- Price + Tax calculation
           'base_price', ROUND(p.base_price * (1 + COALESCE(t.tax_percentage, 0) / 100.0), 2),
           'discounted_price', ROUND(COALESCE(p.discounted_price, p.base_price) * (1 + COALESCE(t.tax_percentage, 0) / 100.0), 2),
-          'subcategories', p.subcategories,
-          'attributes', p.attributes,
           'status', p.status,
-          'created_at', p.created_at
+          'created_at', p.created_at,
+          
+          -- New Stock Logic for Main Product
+          'admin_stock', COALESCE((
+              SELECT SUM(quantity) FROM distributor_inventory WHERE product_id = p.id
+          ), 0),
+          'distributor_stock', COALESCE((
+              SELECT SUM(quantity) 
+              FROM distributor_inventory 
+              WHERE product_id = p.id 
+              AND ($2::int IS NOT NULL AND distributor_id = $2::int)
+          ), 0)
         ) AS product,
         
         jsonb_build_object(
@@ -813,11 +1106,8 @@ exports.getProductByslug = async (req, res) => {
         END AS tax_data,
 
         COALESCE((
-          SELECT jsonb_agg(
-            jsonb_build_object('id', sc.id, 'name', sc.name, 'slug', sc.slug)
-          )
-          FROM categories sc 
-          WHERE sc.id = ANY(p.subcategories)
+          SELECT jsonb_agg(jsonb_build_object('id', sc.id, 'name', sc.name, 'slug', sc.slug))
+          FROM categories sc WHERE sc.id = ANY(p.subcategories)
         ), '[]'::jsonb) AS subcategories,
         
         COALESCE((
@@ -826,29 +1116,37 @@ exports.getProductByslug = async (req, res) => {
               'id', a.id, 
               'name', a.name,
               'values', COALESCE((
-                SELECT jsonb_agg(
-                  jsonb_build_object('id', av.id, 'value', av.value)
-                )
-                FROM attr_values av 
-                WHERE av.attr_id = a.id
+                SELECT jsonb_agg(jsonb_build_object('id', av.id, 'value', av.value))
+                FROM attr_values av WHERE av.attr_id = a.id
               ), '[]'::jsonb)
             )
           )
-          FROM attributes a 
-          WHERE a.id = ANY(p.attributes)
+          FROM attributes a WHERE a.id = ANY(p.attributes)
         ), '[]'::jsonb) AS product_attributes,
         
-        -- Variants with Tax-inclusive price
+        -- Variants with both inventory types
         COALESCE((
           SELECT jsonb_agg(
             jsonb_build_object(
               'id', v.id,
               'sku', v.sku,
-              -- Variant Price + Tax calculation
               'base_price', v.price,
               'price', ROUND(v.price * (1 + COALESCE(t.tax_percentage, 0) / 100.0), 2),
-              'stock', v.stock,
               'bv_point', v.bv_point,
+              
+              -- Split Inventory for Variants
+              'admin_inventory', COALESCE((
+                  SELECT SUM(quantity) 
+                  FROM distributor_inventory 
+                  WHERE product_id = p.id AND variant_id = v.id
+              ), 0),
+              'distributor_inventory', COALESCE((
+                  SELECT SUM(quantity) 
+                  FROM distributor_inventory 
+                  WHERE product_id = p.id AND variant_id = v.id
+                  AND ($2::int IS NOT NULL AND distributor_id = $2::int)
+              ), 0),
+
               'attr_combinations', COALESCE((
                 SELECT jsonb_agg(
                   jsonb_build_object(
@@ -874,12 +1172,9 @@ exports.getProductByslug = async (req, res) => {
       LEFT JOIN pro_variants v2 ON p.id = v2.product_id
       LEFT JOIN tax_settings t ON p.tax_id = t.id
       WHERE p.slug = $1 
-      GROUP BY p.id, c.id, p.name, p.description, p.f_image, p.g_image, p.tax_id, 
-               p.base_price, p.discounted_price, p.subcategories, p.attributes, 
-               p.status, p.created_at, c.name, c.slug,
-               t.id, t.tax_name, t.tax_percentage
+      GROUP BY p.id, c.id, t.id, t.tax_name, t.tax_percentage;
     `,
-      [slug],
+      [slug, dId],
     );
 
     if (result.rows.length === 0) {
@@ -891,7 +1186,7 @@ exports.getProductByslug = async (req, res) => {
 
     res.status(200).json({
       success: true,
-      message: "Product fetched successfully with tax-inclusive prices",
+      message: "Product fetched successfully",
       data: result.rows[0],
     });
   } catch (error) {
@@ -899,11 +1194,9 @@ exports.getProductByslug = async (req, res) => {
     res.status(500).json({
       success: false,
       message: "Internal server error",
-      error: error.message,
     });
   }
 };
-
 exports.updateProduct = async (req, res) => {
   try {
     const { id } = req.params;
