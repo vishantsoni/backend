@@ -14,6 +14,7 @@ const {
   deleteProduct,
   getProductByslug,
   getProductsForDistributor,
+  getProductsSlugs,
 } = require("../controllers/productController");
 const authMiddleware = require("../middleware/authMiddleware");
 const {
@@ -74,6 +75,7 @@ const processProductFiles = (req, res, next) => {
 
 router.get("/categories", getCategories);
 router.get("/products", getProducts);
+router.get("/products-slug", getProductsSlugs);
 router.get("/getDproducts", getProductsForDistributor);
 
 router.post("/category/create", [authMiddleware, isSuperAdmin], createCategory);

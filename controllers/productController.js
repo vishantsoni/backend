@@ -206,6 +206,46 @@ exports.getProducts = async (req, res) => {
   }
 };
 
+exports.getProductsSlugs = async (req, res) => {
+  try {
+    const { status } = req.query;
+    let whereClause = "WHERE 1=1";
+    const values = [];
+
+    if (status) {
+      if (status === "all") {
+        whereClause += " AND p.status IN ('active', 'inactive', 'trash')";
+      } else {
+        whereClause += ` AND p.status = $${values.length + 1}`;
+        values.push(status);
+      }
+    }
+
+    const result = await db.query(
+      `
+      SELECT 
+        p.slug
+       
+      FROM products p 
+      
+      `,
+    );
+
+    res.status(200).json({
+      success: true,
+      message: "Products fetched successfully",
+      data: result.rows,
+    });
+  } catch (error) {
+    console.error("Error fetching products:", error);
+    res.status(500).json({
+      success: false,
+      message: "Internal server error",
+      error: error.message,
+    });
+  }
+};
+
 // distributor products
 exports.getProductsForDistributor = async (req, res) => {
   try {
