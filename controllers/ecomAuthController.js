@@ -199,8 +199,6 @@ exports.login = async (req, res) => {
       return res.status(400).json({ status: false, error: "Account disabled" });
     }
 
-    console.log("valid user - ", validUser);
-
     // 2. Password Check (Now validUser.password exists)
     const isMatch = await bcrypt.compare(password, validUser.password);
     if (!isMatch) {
@@ -210,9 +208,13 @@ exports.login = async (req, res) => {
     }
 
     // 3. JWT Token
-    const token = jwt.sign({ id: validUser.id }, process.env.JWT_SECRET, {
-      expiresIn: "7d",
-    });
+    const token = jwt.sign(
+      { id: validUser.id, type: "ECOM_USER" },
+      process.env.JWT_SECRET,
+      {
+        expiresIn: "7d",
+      },
+    );
 
     // 4. Security: Password delete karo response bhejne se pehle
     delete validUser.password;

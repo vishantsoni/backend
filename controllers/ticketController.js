@@ -51,17 +51,17 @@ exports.raiseTicket = async (req, res) => {
      */
 
     // Ensure raiser has a read marker row (for unread badge logic)
-    await pool.query(
-      `
-        INSERT INTO ticket_reads (ticket_id, viewer_user_id, viewer_user_type, last_read_at)
-        SELECT t.id, $1, $2, CURRENT_TIMESTAMP
-        FROM tickets t
-        WHERE t.case_id = $3
-        ON CONFLICT (ticket_id, viewer_user_id, viewer_user_type)
-        DO UPDATE SET last_read_at = EXCLUDED.last_read_at
-      `,
-      [user_id, user_type, caseId],
-    );
+    // await pool.query(
+    //   `
+    //     INSERT INTO ticket_reads (ticket_id, viewer_user_id, viewer_user_type, last_read_at)
+    //     SELECT t.id, $1, $2, CURRENT_TIMESTAMP
+    //     FROM tickets t
+    //     WHERE t.case_id = $3
+    //     ON CONFLICT (ticket_id, viewer_user_id, viewer_user_type)
+    //     DO UPDATE SET last_read_at = EXCLUDED.last_read_at
+    //   `,
+    //   [user_id, user_type, caseId],
+    // );
 
     res.status(201).json({
       success: true,
@@ -80,19 +80,46 @@ exports.raiseTicket = async (req, res) => {
 
 // Get user's tickets (by distributor_id or ecom_user_id)
 exports.getUserTickets = async (req, res) => {
-  const { id, user_type } = req.user; // from auth middleware or query
+  const { id, type } = req.user; // from auth middleware or query
 
   try {
-    const whereClause = "WHERE ecom_user_id = $1";
+    const userColumn =
+      type === "DISTRIBUTOR" ? "distributor_id" : "ecom_user_id";
+
+    // const whereClause = "WHERE ecom_user_id = $1";
 
     const query = `
-      SELECT id, case_id, subject, status, created_at, updated_at
-      FROM tickets 
-      ${whereClause}
-      ORDER BY created_at DESC
+      SELECT 
+        t.id, 
+        t.case_id, 
+        t.subject, 
+        t.status, 
+        t.created_at, 
+        t.updated_at,
+        -- Check if there are any admin replies created after the user last read the ticket
+        EXISTS (
+          SELECT 1 FROM ticket_replies tr
+          LEFT JOIN ticket_reads trd 
+            ON tr.ticket_id = trd.ticket_id 
+            AND trd.reply_id = tr.id
+            AND trd.viewer_user_id = $1 
+            AND trd.viewer_user_type = $2
+          WHERE tr.ticket_id = t.id            
+            AND tr.created_at > COALESCE(trd.last_read_at, '1970-01-01'::timestamptz)
+        ) AS is_unread
+      FROM tickets t
+      WHERE t.${userColumn} = $1
+      ORDER BY t.updated_at DESC
     `;
 
-    const result = await pool.query(query, [id]);
+    // const query = `
+    //   SELECT id, case_id, subject, status, created_at, updated_at
+    //   FROM tickets
+    //   ${whereClause}
+    //   ORDER BY created_at DESC
+    // `;
+
+    const result = await pool.query(query, [id, type]);
 
     res.json({
       query,
@@ -108,6 +135,8 @@ exports.getUserTickets = async (req, res) => {
 // Get ticket details with replies (auto-mark read + badge for raiser)
 exports.getTicketDetails = async (req, res) => {
   const { caseId } = req.params;
+
+  console.log("ticket details - ", req.user);
 
   // Viewer (raiser or admin) comes from auth middleware.
   // Note: your route currently does NOT require auth for this GET,
@@ -140,12 +169,17 @@ exports.getTicketDetails = async (req, res) => {
     if (viewerId && viewerType) {
       await pool.query(
         `
-          INSERT INTO ticket_reads (ticket_id, viewer_user_id, viewer_user_type, last_read_at)
-          VALUES ($1, $2, $3, CURRENT_TIMESTAMP)
+          INSERT INTO ticket_reads (ticket_id, viewer_user_id, viewer_user_type, reply_id, last_read_at)
+          VALUES ($1, $2, $3, $4, CURRENT_TIMESTAMP)
           ON CONFLICT (ticket_id, viewer_user_id, viewer_user_type)
           DO UPDATE SET last_read_at = CURRENT_TIMESTAMP
         `,
-        [ticketResult.rows[0].id, viewerId, viewerType],
+        [
+          ticketResult.rows[0].id,
+          viewerId,
+          viewerType,
+          repliesResult.rows[0].id || null,
+        ],
       );
     }
 

@@ -5,14 +5,15 @@ const auth = require("../middleware/authMiddleware");
 const isAdmin = require("../middleware/isAdmin");
 const isSuperAdmin = require("../middleware/isSuperAdmin");
 const ecomAuth = require("../middleware/ecomAuth");
+const orAuth = require("../middleware/orAuth");
 
 // Public: Raise ticket (no auth needed)
 router.post("/raise-ticket", ticketController.raiseTicket);
 
 // Auth required user routes
 router.get("/my-tickets", ecomAuth, ticketController.getUserTickets);
-router.get("/:caseId", ticketController.getTicketDetails);
-router.post("/:caseId/reply", auth, ticketController.replyToTicket);
+router.get("/:caseId", orAuth, ticketController.getTicketDetails);
+router.post("/:caseId/reply", orAuth, ticketController.replyToTicket);
 
 // distributor routes
 router.get("/dis/my-tickets", auth, ticketController.getDistributorTickets);

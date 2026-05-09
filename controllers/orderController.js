@@ -367,7 +367,7 @@ exports.placeOrder = async (req, res) => {
            JOIN products p ON pv.product_id = p.id 
            LEFT JOIN tax_settings t ON p.tax_id = t.id
            WHERE pv.id = $1 AND p.status = 'active'`
-        : `SELECT p.id::text as sku, p.base_price as price, COALESCE(p.bv_point, 0) as bv_point, 
+        : `SELECT p.id::text as sku, p.base_price as price, 0 as bv_point, 
            p.name as product_name, p.f_image, t.tax_percentage
            FROM products p
            LEFT JOIN tax_settings t ON p.tax_id = t.id
