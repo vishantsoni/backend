@@ -52,6 +52,15 @@ const authMiddleware = require("../middleware/authMiddleware");
 // Auth Routes (public)
 router.post("/auth/register", register);
 router.post("/auth/login", login);
+
+// Forget password (OTP) - minimal flow: send OTP + reset using identifier+otp+newPassword
+const {
+  sendForgotPasswordOtp,
+  resetForgotPassword,
+} = require("../controllers/ecomPasswordController");
+router.post("/auth/forgot-password-otp", sendForgotPasswordOtp);
+router.post("/auth/reset-password", resetForgotPassword);
+
 router.get("/auth/me", ecomAuth, authMe);
 
 // Profile & Addresses (auth)
