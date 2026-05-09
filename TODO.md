@@ -1,9 +1,26 @@
-# TODO - Dashboard ecom/me metrics
+# TODO - Ticket read/unread logic
 
-- [ ] Implement new dashboard metrics function "dashboard" in controllers/dashboardController.js
-  - Total Orders (COUNT from orders)
-  - Open Tickets (COUNT from tickets with non-closed status)
-  - Total Order Value (SUM total_amount from orders)
-- [ ] Wire route /ecom/me to the new function in routes/dashboardRoutes.js
-- [ ] Add/verify required SQL column names for tickets and orders
-- [ ] Run lint/tests or start server to validate endpoint response shape
+## Step 1 (done)
+
+- Inspect ticket schema usage in code: routes/supportRoutes.js and controllers/ticketController.js
+
+## Step 2 (done)
+
+- Add DB table(s) needed for read/unread (ticket_reads) in init.sql (idempotent)
+
+## Step 3 (done)
+
+- Update ticketController:
+  - Fix export statement
+  - Update raiseTicket to initialize ticket_reads for raiser
+  - Update getTicketDetails to:
+    - auto-mark read for viewer on GET
+    - return unread_badge (badge count) for raiser
+
+## Step 4 (done)
+
+- Update any routes if needed (auto-mark read on GET)
+
+## Step 5 (next)
+
+- Run quick node syntax check and (if available) run tests/server smoke

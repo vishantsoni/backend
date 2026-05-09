@@ -50,6 +50,19 @@ exports.raiseTicket = async (req, res) => {
      * Mailer service here to support@feelsafeco.in
      */
 
+    // Ensure raiser has a read marker row (for unread badge logic)
+    await pool.query(
+      `
+        INSERT INTO ticket_reads (ticket_id, viewer_user_id, viewer_user_type, last_read_at)
+        SELECT t.id, $1, $2, CURRENT_TIMESTAMP
+        FROM tickets t
+        WHERE t.case_id = $3
+        ON CONFLICT (ticket_id, viewer_user_id, viewer_user_type)
+        DO UPDATE SET last_read_at = EXCLUDED.last_read_at
+      `,
+      [user_id, user_type, caseId],
+    );
+
     res.status(201).json({
       success: true,
       caseId: result.rows[0].case_id,
@@ -92,9 +105,15 @@ exports.getUserTickets = async (req, res) => {
   }
 };
 
-// Get ticket details with replies
+// Get ticket details with replies (auto-mark read + badge for raiser)
 exports.getTicketDetails = async (req, res) => {
   const { caseId } = req.params;
+
+  // Viewer (raiser or admin) comes from auth middleware.
+  // Note: your route currently does NOT require auth for this GET,
+  // so unread badge/mark-read will be applied only if req.user is present.
+  const viewerId = req.user?.id ?? null;
+  const viewerType = req.user?.type ?? null;
 
   try {
     const ticketQuery = `
@@ -117,10 +136,59 @@ exports.getTicketDetails = async (req, res) => {
       ticketResult.rows[0].id,
     ]);
 
+    // Mark viewer's read timestamp (auto-mark read)
+    if (viewerId && viewerType) {
+      await pool.query(
+        `
+          INSERT INTO ticket_reads (ticket_id, viewer_user_id, viewer_user_type, last_read_at)
+          VALUES ($1, $2, $3, CURRENT_TIMESTAMP)
+          ON CONFLICT (ticket_id, viewer_user_id, viewer_user_type)
+          DO UPDATE SET last_read_at = CURRENT_TIMESTAMP
+        `,
+        [ticketResult.rows[0].id, viewerId, viewerType],
+      );
+    }
+
+    // Badge count for raiser (ECOM_USER / DISTRIBUTOR): count admin replies after raiser last_read_at
+    let raiserUnreadCount = 0;
+    try {
+      const raiserUserId =
+        ticketResult.rows[0].ecom_user_id ||
+        ticketResult.rows[0].distributor_id;
+      const raiserUserType = ticketResult.rows[0].ecom_user_id
+        ? "ECOM_USER"
+        : ticketResult.rows[0].distributor_id
+        ? "DISTRIBUTOR"
+        : null;
+
+      if (raiserUserId && raiserUserType) {
+        const raiserRead = await pool.query(
+          `SELECT COALESCE(last_read_at, '1970-01-01'::timestamptz) AS last_read_at
+           FROM ticket_reads
+           WHERE ticket_id = $1 AND viewer_user_id = $2 AND viewer_user_type = $3`,
+          [ticketResult.rows[0].id, raiserUserId, raiserUserType],
+        );
+
+        const lastReadAt = raiserRead.rows[0].last_read_at;
+        const unreadRes = await pool.query(
+          `SELECT COUNT(*)::int AS unread_count
+           FROM ticket_replies
+           WHERE ticket_id = $1
+             AND is_admin = TRUE
+             AND created_at > $2`,
+          [ticketResult.rows[0].id, lastReadAt],
+        );
+        raiserUnreadCount = unreadRes.rows[0].unread_count;
+      }
+    } catch (e) {
+      raiserUnreadCount = 0;
+    }
+
     res.json({
       success: true,
       ticket: ticketResult.rows[0],
       replies: repliesResult.rows,
+      unread_badge: raiserUnreadCount,
     });
   } catch (err) {
     console.error("Get ticket details error:", err);
@@ -292,5 +360,3 @@ exports.getDistributorTickets = async (req, res) => {
     res.status(500).json({ success: false, error: "Server error" });
   }
 };
-
-module.exports = exports;
