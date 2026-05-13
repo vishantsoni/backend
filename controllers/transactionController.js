@@ -23,12 +23,10 @@ exports.verifyPin = async (req, res) => {
       [userId],
     );
     if (!user.rows[0]?.transaction_pin_hash) {
-      return res
-        .status(400)
-        .json({
-          success: false,
-          error: "Transaction PIN not set. Set PIN first.",
-        });
+      return res.status(400).json({
+        success: false,
+        error: "Transaction PIN not set. Set PIN first.",
+      });
     }
 
     const isValid = await bcrypt.compare(
@@ -457,5 +455,260 @@ exports.rejectWithdrawRequest = async (req, res) => {
   } catch (err) {
     console.error(err);
     res.status(400).json({ success: false, error: err.message });
+  }
+};
+
+// =============================
+// Super Admin: List all transactions
+// GET /api/transactions?page=1&limit=20&status=&type=&category=&userId=
+// =============================
+exports.listAllTransactionsForSuperAdmin = async (req, res) => {
+  try {
+    const { page = 1, limit = 20, status, type, category, userId } = req.query;
+
+    const offset = (parseInt(page) - 1) * parseInt(limit);
+
+    const where = [];
+    const params = [];
+    let pIndex = 1;
+
+    if (status) {
+      where.push(`t.status = $${pIndex}`);
+      params.push(String(status));
+      pIndex++;
+    }
+    if (type) {
+      where.push(`t.type = $${pIndex}`);
+      params.push(String(type));
+      pIndex++;
+    }
+    if (category) {
+      where.push(`t.category = $${pIndex}`);
+      params.push(String(category));
+      pIndex++;
+    }
+    if (userId) {
+      where.push(`t.user_id = $${pIndex}`);
+      params.push(parseInt(userId));
+      pIndex++;
+    }
+
+    const whereSql = where.length ? `WHERE ${where.join(" AND ")}` : "";
+
+    const query = `
+      SELECT
+        t.id,
+        t.user_id,
+        u.username,
+        u.full_name,
+        t.amount,
+        t.type,
+        t.category,
+        t.source_user_id,
+        t.remarks,
+        t.status,
+        t.created_at,
+         COALESCE(
+            SUM(
+              CASE
+                WHEN (s.setting_value->>'uv_type') = 'percentage'
+                  THEN (t.amount * (s.setting_value->>'uv_value')::numeric) / 100
+                ELSE (t.amount / NULLIF((s.setting_value->>'uv_value')::numeric, 0))
+              END
+            ) ,
+            0
+          )::numeric(15,2) AS amount
+      FROM transactions t
+      LEFT JOIN users u ON u.id = t.user_id
+      CROSS JOIN app_settings s
+      WHERE s.setting_key = 'point_system'
+        ${whereSql ? whereSql.replace("WHERE ", "AND ") : ""}
+      GROUP BY 
+        t.id,
+        u.username,
+        u.full_name,
+        s.setting_value
+      ORDER BY t.created_at DESC
+      LIMIT $${pIndex} OFFSET $${pIndex + 1}
+    `;
+
+    const countQuery = `
+      SELECT COUNT(*)::int AS total
+      FROM transactions t
+      ${whereSql}
+    `;
+
+    const [txns, countResult] = await Promise.all([
+      db.query(query, [...params, parseInt(limit), offset]),
+      db.query(countQuery, params),
+    ]);
+
+    // NEW: When a user filter is applied, also return wallet + transaction statistics.
+    if (userId) {
+      const userIdInt = parseInt(userId);
+
+      const walletQuery = `
+        SELECT
+          COALESCE(w.total_amount, 0)::numeric(15,2) AS total_amount,
+          COALESCE(w.pending_amount, 0)::numeric(15,2) AS pending_amount,
+          (COALESCE(w.total_amount, 0) + COALESCE(w.pending_amount, 0))::numeric(15,2) AS available_balance,
+
+          -- UV conversion for wallet amounts (same logic as transactions)
+          COALESCE(
+            CASE
+              WHEN (s.setting_value->>'uv_type') = 'percentage'
+                THEN (COALESCE(w.total_amount, 0) * (s.setting_value->>'uv_value')::numeric) / 100
+              ELSE (COALESCE(w.total_amount, 0) / NULLIF((s.setting_value->>'uv_value')::numeric, 0))
+            END,
+          0
+          )::numeric(15,2) AS total_amount_uv,
+
+          COALESCE(
+            CASE
+              WHEN (s.setting_value->>'uv_type') = 'percentage'
+                THEN (COALESCE(w.pending_amount, 0) * (s.setting_value->>'uv_value')::numeric) / 100
+              ELSE (COALESCE(w.pending_amount, 0) / NULLIF((s.setting_value->>'uv_value')::numeric, 0))
+            END,
+          0
+          )::numeric(15,2) AS pending_amount_uv,
+
+          COALESCE(
+            CASE
+              WHEN (s.setting_value->>'uv_type') = 'percentage'
+                THEN ((COALESCE(w.total_amount, 0) + COALESCE(w.pending_amount, 0)) * (s.setting_value->>'uv_value')::numeric) / 100
+              ELSE ((COALESCE(w.total_amount, 0) + COALESCE(w.pending_amount, 0)) / NULLIF((s.setting_value->>'uv_value')::numeric, 0))
+            END,
+          0
+          )::numeric(15,2) AS available_balance_uv,
+
+          COALESCE(
+            CASE
+              WHEN (s.setting_value->>'uv_type') = 'percentage'
+                THEN ((COALESCE(w.company_fund, 0) + COALESCE(w.company_fund, 0)) * (s.setting_value->>'uv_value')::numeric) / 100
+              ELSE ((COALESCE(w.company_fund, 0) + COALESCE(w.company_fund, 0)) / NULLIF((s.setting_value->>'uv_value')::numeric, 0))
+            END,
+          0
+          )::numeric(15,2) AS company_fund_uv
+
+        FROM wallets w
+        CROSS JOIN app_settings s
+        WHERE s.setting_key = 'point_system'
+          AND w.user_id = $1
+      `;
+
+      // Transaction totals are computed only for the same filtered set.
+      // If status/type/category filters are not provided, it naturally returns totals for all those transactions.
+      const transactionTotalsQuery = `
+        SELECT
+          COUNT(*)::int AS total_transactions,
+
+          -- Raw amount totals
+          COALESCE(SUM(amount) FILTER (WHERE type = 'credit'), 0)::numeric(15,2) AS total_credits,
+          COALESCE(SUM(amount) FILTER (WHERE type = 'debit'), 0)::numeric(15,2) AS total_debits,
+          COALESCE(SUM(amount) FILTER (WHERE type = 'credit'), 0)
+            - COALESCE(SUM(amount) FILTER (WHERE type = 'debit'), 0) AS net_amount,
+
+          -- UV totals (depends on uv_type)
+          COALESCE(
+            SUM(
+              CASE
+                WHEN (s.setting_value->>'uv_type') = 'percentage'
+                  THEN (amount * (s.setting_value->>'uv_value')::numeric) / 100
+                ELSE (amount / NULLIF((s.setting_value->>'uv_value')::numeric, 0))
+              END
+            ) FILTER (WHERE type = 'credit'),
+            0
+          )::numeric(15,2) AS total_credits_uv,
+
+          COALESCE(
+            SUM(
+              CASE
+                WHEN (s.setting_value->>'uv_type') = 'percentage'
+                  THEN (amount * (s.setting_value->>'uv_value')::numeric) / 100
+                ELSE (amount / NULLIF((s.setting_value->>'uv_value')::numeric, 0))
+              END
+            ) FILTER (WHERE type = 'debit'),
+            0
+          )::numeric(15,2) AS total_debits_uv,
+
+          COALESCE(
+            SUM(
+              CASE
+                WHEN (s.setting_value->>'uv_type') = 'percentage'
+                  THEN (amount * (s.setting_value->>'uv_value')::numeric) / 100
+                ELSE (amount / NULLIF((s.setting_value->>'uv_value')::numeric, 0))
+              END
+            ) FILTER (WHERE type = 'credit'),
+            0
+          )::numeric(15,2)
+          - COALESCE(
+              SUM(
+                CASE
+                  WHEN (s.setting_value->>'uv_type') = 'percentage'
+                    THEN (amount * (s.setting_value->>'uv_value')::numeric) / 100
+                  ELSE (amount / NULLIF((s.setting_value->>'uv_value')::numeric, 0))
+                END
+              ) FILTER (WHERE type = 'debit'),
+              0
+            )::numeric(15,2) AS net_amount_uv
+        FROM transactions t
+        CROSS JOIN app_settings s
+        WHERE s.setting_key = 'point_system'
+        ${whereSql ? whereSql.replace("WHERE ", "AND ") : ""}
+      `;
+
+      const [walletRes, txnTotalsRes] = await Promise.all([
+        db.query(walletQuery, [userIdInt]),
+        db.query(transactionTotalsQuery, params),
+      ]);
+
+      const wallet = walletRes.rows[0] || {
+        total_amount: 0,
+        pending_amount: 0,
+        available_balance: 0,
+        total_amount_uv: 0,
+        pending_amount_uv: 0,
+        available_balance_uv: 0,
+      };
+
+      const txnTotals = txnTotalsRes.rows[0] || {
+        total_transactions: 0,
+        total_credits: 0,
+        total_debits: 0,
+        net_amount: 0,
+        total_credits_uv: 0,
+        total_debits_uv: 0,
+        net_amount_uv: 0,
+      };
+
+      return res.json({
+        success: true,
+        data: txns.rows,
+        pagination: {
+          page: parseInt(page),
+          limit: parseInt(limit),
+          total: countResult.rows[0]?.total || 0,
+          pages:
+            Math.ceil((countResult.rows[0]?.total || 0) / parseInt(limit)) || 1,
+        },
+        wallet,
+        transactionStats: txnTotals,
+      });
+    }
+
+    res.json({
+      success: true,
+      data: txns.rows,
+      pagination: {
+        page: parseInt(page),
+        limit: parseInt(limit),
+        total: countResult.rows[0]?.total || 0,
+        pages:
+          Math.ceil((countResult.rows[0]?.total || 0) / parseInt(limit)) || 1,
+      },
+    });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ success: false, error: "Server error" });
   }
 };

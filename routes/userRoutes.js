@@ -22,6 +22,7 @@ router.get(
 
 router.post("/create", userController.createUser);
 router.get("/profile-by-referral", userController.getProfile);
+router.put("/me/profile", auth, userController.updateMyProfile);
 
 // Transaction PIN & Password
 router.post("/set-pin", auth, userController.setTransactionPin);

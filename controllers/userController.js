@@ -95,6 +95,7 @@ exports.getMyDownline = async (req, res) => {
         u.phone, 
         u.node_path, 
         u.referrer_id, 
+        u.referral_code,
         u.created_at,
         u.full_name as name,
         -- Subquery to count descendants for each row
@@ -281,6 +282,138 @@ exports.getKycStatus = async (req, res) => {
   } catch (err) {
     console.error(err);
     res.status(500).json({ status: false, error: "Server error" });
+  }
+};
+
+exports.updateMyProfile = async (req, res) => {
+  try {
+    const userId = req.user?.id;
+    if (!userId) {
+      return res.status(401).json({ status: false, error: "Unauthorized" });
+    }
+
+    const body = req.body || {};
+
+    // Whitelist fields that can be updated in `users` table
+    const allowedFields = [
+      "full_name",
+      "email",
+      "phone",
+      "whatsapp_no",
+      "aadhaar_no",
+      "pan_no",
+      "dob",
+      "gender",
+      "address",
+      "city",
+      "state",
+      "pin",
+      "bank_name",
+      "account_holder_name",
+      "account_no",
+      "ifsc_code",
+      "branch",
+    ];
+
+    // Client might send camelCase too (common with your createUser)
+    const camelMap = {
+      fullName: "full_name",
+      whatsappNo: "whatsapp_no",
+      aadhaarNo: "aadhaar_no",
+      panNo: "pan_no",
+      bankName: "bank_name",
+      accountHolderName: "account_holder_name",
+      accountNo: "account_no",
+      ifscCode: "ifsc_code",
+    };
+
+    for (const [k, v] of Object.entries(camelMap)) {
+      if (body[k] !== undefined && body[v] === undefined) {
+        body[v] = body[k];
+      }
+    }
+
+    const updates = [];
+    const values = [];
+    let idx = 1;
+
+    // Unique checks (only if changed)
+    if (body.email !== undefined) {
+      const current = await db.query("SELECT email FROM users WHERE id = $1", [
+        userId,
+      ]);
+      const currentEmail = current.rows[0]?.email;
+
+      if (body.email && body.email !== currentEmail) {
+        const exists = await db.query(
+          "SELECT id FROM users WHERE email = $1 AND id != $2",
+          [body.email, userId],
+        );
+        if (exists.rows.length > 0) {
+          return res
+            .status(400)
+            .json({ status: false, error: "Email already in use" });
+        }
+      }
+    }
+
+    if (body.phone !== undefined) {
+      const current = await db.query("SELECT phone FROM users WHERE id = $1", [
+        userId,
+      ]);
+      const currentPhone = current.rows[0]?.phone;
+      if (body.phone && body.phone !== currentPhone) {
+        const exists = await db.query(
+          "SELECT id FROM users WHERE phone = $1 AND id != $2",
+          [body.phone, userId],
+        );
+        if (exists.rows.length > 0) {
+          return res
+            .status(400)
+            .json({ status: false, error: "Phone already in use" });
+        }
+      }
+    }
+
+    for (const field of allowedFields) {
+      if (body[field] !== undefined) {
+        updates.push(`${field} = $${idx++}`);
+        values.push(body[field]);
+      }
+    }
+
+    if (updates.length === 0) {
+      return res
+        .status(400)
+        .json({ status: false, error: "No valid fields to update" });
+    }
+
+    values.push(userId);
+
+    const query = `
+      UPDATE users
+      SET ${updates.join(", ")}
+      WHERE id = $${idx}
+      RETURNING id, full_name, email, phone, whatsapp_no, address, city, state, pin, bank_name, account_holder_name, account_no, ifsc_code, branch, aadhaar_no, pan_no, dob, gender
+    `;
+
+    const result = await db.query(query, values);
+    if (result.rows.length === 0) {
+      return res.status(404).json({ status: false, error: "User not found" });
+    }
+
+    return res.json({
+      status: true,
+      message: "Profile updated",
+      user: result.rows[0],
+    });
+  } catch (err) {
+    // unique constraint fallback (email/phone)
+    if (err.code === "23505") {
+      return res.status(400).json({ status: false, error: "Duplicate value" });
+    }
+    console.error(err);
+    return res.status(500).json({ status: false, error: "Server error" });
   }
 };
 

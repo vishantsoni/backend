@@ -10,16 +10,16 @@ exports.getAllStaff = async (req, res) => {
     const offset = (page - 1) * limit;
 
     let query = `
-      SELECT 
-        s.id, s.department, s.designation, s.salary, s.hire_date, s.is_active,
-        s.created_at as hire_time,
-        u.id as user_id, u.username, u.full_name, u.email, u.phone, u.kyc_status,
-        r.name as role_name, r.permissions
-      FROM staff s
-      JOIN users u ON s.user_id = u.id
-      LEFT JOIN roles r ON s.role_id = r.id
-      WHERE 1=1
-    `;
+        SELECT 
+          s.id, s.department, s.designation, s.salary, s.hire_date, s.is_active, s.role_id,
+          s.created_at as hire_time,
+          u.id as user_id, u.username, u.full_name, u.email, u.phone, u.kyc_status,
+          r.name as role_name, r.permissions
+        FROM staff s
+        JOIN users u ON s.user_id = u.id
+        LEFT JOIN roles r ON s.role_id = r.id
+        WHERE 1=1
+      `;
     let params = [];
 
     if (department) {
@@ -42,13 +42,13 @@ exports.getAllStaff = async (req, res) => {
 
     // Count for pagination
     const countQuery = `
-      SELECT COUNT(s.id)::int as total
-      FROM staff s ${
-        department || search ? "JOIN users u ON s.user_id = u.id" : ""
-      }
-      ${department ? "WHERE s.department ILIKE $1" : ""} 
-      ${search ? "AND (u.full_name ILIKE $1 OR u.username ILIKE $1)" : ""}
-    `;
+        SELECT COUNT(s.id)::int as total
+        FROM staff s ${
+          department || search ? "JOIN users u ON s.user_id = u.id" : ""
+        }
+        ${department ? "WHERE s.department ILIKE $1" : ""} 
+        ${search ? "AND (u.full_name ILIKE $1 OR u.username ILIKE $1)" : ""}
+      `;
     const countParams = department
       ? [`%${department}%`]
       : search
@@ -119,17 +119,17 @@ exports.createStaff = async (req, res) => {
       // 2. Added referral_code to the INSERT statement
       const newUser = await client.query(
         `INSERT INTO users (
-            username, 
-            full_name, 
-            email, 
-            phone, 
-            password_hash, 
-            role_id, 
-            referral_code, 
-            is_active,
-            kyc_status
-         ) 
-         VALUES ($1, $2, $3, $4, $5, $6, $7, true, true) RETURNING id`,
+              username, 
+              full_name, 
+              email, 
+              phone, 
+              password_hash, 
+              role_id, 
+              referral_code, 
+              is_active,
+              kyc_status
+          ) 
+          VALUES ($1, $2, $3, $4, $5, $6, $7, true, true) RETURNING id`,
         [
           username,
           full_name,
@@ -145,7 +145,7 @@ exports.createStaff = async (req, res) => {
 
     const staffResult = await client.query(
       `INSERT INTO staff (user_id, role_id, department, designation, salary, hire_date, manager_id) 
-       VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING *`,
+        VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING *`,
       [
         userId,
         role_id,
@@ -169,12 +169,17 @@ exports.createStaff = async (req, res) => {
 };
 
 // PUT /api/staff/:id - Update staff
+// PUT /api/staff/:id - Update staff and linked user details
 exports.updateStaff = async (req, res) => {
+  const client = await db.connect();
   try {
     const { id } = req.params;
-    const updates = req.body; // department, salary, role_id, etc.
+    const updates = req.body;
 
-    const allowedFields = [
+    await client.query("BEGIN");
+
+    // 1. Tables ke hisaab se fields ko divide karein
+    const staffAllowed = [
       "department",
       "designation",
       "salary",
@@ -183,37 +188,79 @@ exports.updateStaff = async (req, res) => {
       "role_id",
       "is_active",
     ];
-    const updateFields = Object.keys(updates).filter((key) =>
-      allowedFields.includes(key),
+    const userAllowed = ["full_name", "phone", "email"];
+
+    const staffFields = Object.keys(updates).filter((key) =>
+      staffAllowed.includes(key),
+    );
+    const userFields = Object.keys(updates).filter((key) =>
+      userAllowed.includes(key),
     );
 
-    if (updateFields.length === 0) {
+    if (staffFields.length === 0 && userFields.length === 0) {
       return res
         .status(400)
         .json({ status: false, error: "No valid fields to update" });
     }
 
-    let setClause = updateFields
-      .map((field, index) => `${field} = $${index + 1}`)
-      .join(", ");
-    const values = updateFields.map((field) => updates[field]);
-    values.push(id);
-
-    const result = await db.query(
-      `UPDATE staff 
-       SET ${setClause}, updated_at = CURRENT_TIMESTAMP 
-       WHERE id = $${values.length} RETURNING *`,
-      values,
+    // 2. Pehle check karein staff exist karta hai ya nahi aur uska user_id nikaalein
+    const staffCheck = await client.query(
+      "SELECT user_id FROM staff WHERE id = $1",
+      [id],
     );
-
-    if (result.rows.length === 0) {
-      return res.status(404).json({ status: false, error: "Staff not found" });
+    if (staffCheck.rows.length === 0) {
+      throw new Error("Staff not found");
     }
+    const userId = staffCheck.rows[0].user_id;
+
+    // 3. Update STAFF table (agar fields hain)
+    if (staffFields.length > 0) {
+      const setClause = staffFields
+        .map((f, i) => `${f} = $${i + 1}`)
+        .join(", ");
+      const values = staffFields.map((f) => updates[f]);
+      values.push(id);
+      await client.query(
+        `UPDATE staff SET ${setClause} WHERE id = $${values.length}`,
+        values,
+      );
+    }
+
+    // 4. Update USERS table (agar fields hain)
+    if (userFields.length > 0) {
+      const setClause = userFields.map((f, i) => `${f} = $${i + 1}`).join(", ");
+      const values = userFields.map((f) => updates[f]);
+      values.push(userId);
+      await client.query(
+        `UPDATE users SET ${setClause} WHERE id = $${values.length}`,
+        values,
+      );
+    }
+
+    await client.query("COMMIT");
+
+    // 5. Updated data fetch karke waapis bhejein (getAllStaff format mein)
+    const result = await client.query(
+      `
+      SELECT s.*, u.username, u.full_name, u.email, u.phone, r.name as role_name
+      FROM staff s
+      JOIN users u ON s.user_id = u.id
+      LEFT JOIN roles r ON s.role_id = r.id
+      WHERE s.id = $1
+    `,
+      [id],
+    );
 
     res.json({ status: true, data: result.rows[0] });
   } catch (err) {
-    console.error(err);
-    res.status(500).json({ status: false, error: "Server error" });
+    await client.query("ROLLBACK");
+    console.error("Update Staff Error:", err.message);
+    res.status(err.message === "Staff not found" ? 404 : 500).json({
+      status: false,
+      error: err.message,
+    });
+  } finally {
+    client.release();
   }
 };
 
@@ -244,14 +291,14 @@ exports.getStaffById = async (req, res) => {
     const { id } = req.params;
     const staff = await db.query(
       `
-      SELECT 
-        s.*, u.username, u.email, u.phone, u.full_name,
-        r.name as role_name
-      FROM staff s
-      JOIN users u ON s.user_id = u.id
-      LEFT JOIN roles r ON s.role_id = r.id
-      WHERE s.id = $1
-    `,
+        SELECT 
+          s.*, u.username, u.email, u.phone, u.full_name,
+          r.name as role_name
+        FROM staff s
+        JOIN users u ON s.user_id = u.id
+        LEFT JOIN roles r ON s.role_id = r.id
+        WHERE s.id = $1
+      `,
       [id],
     );
 

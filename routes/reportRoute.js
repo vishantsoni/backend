@@ -6,6 +6,7 @@ const {
   getPurchaseReport,
   getGSTReport,
   exportGSTReportExcel,
+  exportSalesReportExcel,
 } = require("../controllers/reportsController");
 const authMiddleware = require("../middleware/authMiddleware");
 const isAdmin = require("../middleware/isAdmin");
@@ -13,6 +14,14 @@ const isSuperAdmin = require("../middleware/isSuperAdmin");
 
 // @route   GET api/reports/sales
 router.get("/sales", authMiddleware, isSuperAdmin, getSalesReport);
+
+// @route   GET api/reports/sales-excel
+router.get(
+  "/sales-excel",
+  authMiddleware,
+  isSuperAdmin,
+  exportSalesReportExcel,
+);
 
 // @route   GET api/reports/profit-loss
 router.get("/profit-loss", authMiddleware, isSuperAdmin, getProfitLossReport);

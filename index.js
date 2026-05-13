@@ -46,6 +46,7 @@ app.use("/api/staff", require("./routes/staffRoutes"));
 app.use("/api/notifications", require("./routes/notificationRoutes"));
 app.use("/api/inventory", require("./routes/inventoryRoutes"));
 app.use("/api/reports", require("./routes/reportRoute"));
+app.use("/api/analytics", require("./routes/analyticsRoutes"));
 app.use("/api/dashboard", require("./routes/dashboardRoutes"));
 app.use("/api/milestones", require("./routes/milestoneRoutes"));
 app.use("/api/blog", require("./routes/blogRoute"));

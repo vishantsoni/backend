@@ -1,26 +1,6 @@
-# TODO - Ticket read/unread logic
+# TODO
 
-## Step 1 (done)
+- [x] Add `PUT /me/profile` (protected by auth) route to update logged-in user's `users` table profile
+- [x] Implement `exports.updateMyProfile` in `controllers/userController.js` with dynamic, parameterized SQL update and validation/unique checks
 
-- Inspect ticket schema usage in code: routes/supportRoutes.js and controllers/ticketController.js
-
-## Step 2 (done)
-
-- Add DB table(s) needed for read/unread (ticket_reads) in init.sql (idempotent)
-
-## Step 3 (done)
-
-- Update ticketController:
-  - Fix export statement
-  - Update raiseTicket to initialize ticket_reads for raiser
-  - Update getTicketDetails to:
-    - auto-mark read for viewer on GET
-    - return unread_badge (badge count) for raiser
-
-## Step 4 (done)
-
-- Update any routes if needed (auto-mark read on GET)
-
-## Step 5 (next)
-
-- Run quick node syntax check and (if available) run tests/server smoke
+- [ ] Smoke-test: run server and call new endpoint with auth token

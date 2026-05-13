@@ -19,6 +19,14 @@ router.post("/change-password", authMiddleware, userController.changePassword);
 router.post("/transfer", authMiddleware, transactionController.transferToUser);
 router.post("/withdraw", authMiddleware, transactionController.withdraw);
 
+// Super Admin: All transactions
+router.get(
+  "/transactions",
+  authMiddleware,
+  isSuperAdmin,
+  transactionController.listAllTransactionsForSuperAdmin,
+);
+
 // Super Admin: Withdraw requests workflow
 router.get(
   "/withdraw-requests",
@@ -26,6 +34,7 @@ router.get(
   isSuperAdmin,
   transactionController.listWithdrawRequests,
 );
+
 router.post(
   "/withdraw-requests/:id/approve",
   authMiddleware,

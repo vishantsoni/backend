@@ -766,3 +766,87 @@ exports.exportGSTReportExcel = async (req, res) => {
     res.status(500).json({ success: false, message: "Export failed" });
   }
 };
+
+// Helper to build date range clause
+
+exports.exportSalesReportExcel = async (req, res) => {
+  try {
+    const { from, to } = req.query;
+    const { clause: dateClause, params: dateParams } = buildDateRange(
+      from,
+      to,
+      "o",
+    );
+
+    const reportQuery = `
+      SELECT
+        o.order_id,
+        o.created_at,
+        COALESCE(eu.name, u.full_name, u.username) as customer_name,
+        CASE WHEN o.order_for LIKE 'distributor_%' THEN 'B2B' ELSE 'B2C' END as type,
+        o.order_status,
+        o.payment_status,
+        o.sub_total::numeric(12,2) as sub_total,
+        o.tax_amount::numeric(12,2) as tax_amount,
+        o.shipping_charges::numeric(12,2) as shipping_charges,
+        o.total_amount::numeric(12,2) as total_amount,
+        COALESCE(SUM(oi.total_item_bv), 0)::int as bv_points
+      FROM orders o
+      LEFT JOIN order_items oi ON o.id = oi.order_id
+      LEFT JOIN ecom_user eu ON o.user_id = eu.id
+      LEFT JOIN users u ON o.distributor_id = u.id
+      WHERE o.payment_status = 'paid'
+      ${dateClause}
+      GROUP BY o.id, o.order_id, o.created_at, eu.name, u.full_name, u.username, type, o.order_status, o.payment_status, o.sub_total, o.tax_amount, o.shipping_charges, o.total_amount
+      ORDER BY o.created_at DESC
+    `;
+
+    const result = await db.query(reportQuery, dateParams);
+    const workbook = new ExcelJS.Workbook();
+    const worksheet = workbook.addWorksheet("Sales Report");
+
+    worksheet.columns = [
+      { header: "Order ID", key: "order_id", width: 20 },
+      { header: "Date", key: "created_at", width: 15 },
+      { header: "Customer", key: "customer_name", width: 25 },
+      { header: "Type", key: "type", width: 10 },
+      { header: "Order Status", key: "order_status", width: 15 },
+      { header: "Payment Status", key: "payment_status", width: 15 },
+      { header: "Sub Total (₹)", key: "sub_total", width: 15 },
+      { header: "Tax Amount (₹)", key: "tax_amount", width: 15 },
+      { header: "Shipping (₹)", key: "shipping_charges", width: 15 },
+      { header: "Total Amount (₹)", key: "total_amount", width: 18 },
+      { header: "BV Points", key: "bv_points", width: 10 },
+    ];
+
+    worksheet.getRow(1).eachCell((cell) => {
+      cell.font = { bold: true, color: { argb: "FFFFFF" } };
+      cell.fill = {
+        type: "pattern",
+        pattern: "solid",
+        fgColor: { argb: "4CAF50" },
+      };
+    });
+
+    result.rows.forEach((row) => {
+      worksheet.addRow({
+        ...row,
+        created_at: new Date(row.created_at).toLocaleDateString(),
+      });
+    });
+
+    res.setHeader(
+      "Content-Type",
+      "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    );
+    res.setHeader(
+      "Content-Disposition",
+      `attachment; filename=Sales_Report.xlsx`,
+    );
+    await workbook.xlsx.write(res);
+    res.end();
+  } catch (error) {
+    console.error("Excel Export Error (Sales):", error);
+    res.status(500).json({ success: false, message: "Export failed" });
+  }
+};
