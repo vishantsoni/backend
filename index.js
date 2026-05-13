@@ -49,7 +49,9 @@ app.use("/api/reports", require("./routes/reportRoute"));
 app.use("/api/analytics", require("./routes/analyticsRoutes"));
 app.use("/api/dashboard", require("./routes/dashboardRoutes"));
 app.use("/api/milestones", require("./routes/milestoneRoutes"));
+app.use("/api/id-cards", require("./routes/idCardRoutes"));
 app.use("/api/blog", require("./routes/blogRoute"));
+
 app.use("/api/support", require("./routes/supportRoutes"));
 app.use("/api/business", require("./routes/businessRoutes"));
 app.use("/api/sample-requests", require("./routes/sampleRequestRoutes"));

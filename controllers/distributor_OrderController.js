@@ -1,4 +1,5 @@
 const db = require("../config/db");
+const { generateAndSaveIdCard } = require("../utils/idCardService");
 const generateOrderId = () => {
   const now = new Date();
 
@@ -196,6 +197,36 @@ const checkAndDistributeMilestone = async (
 
     if (milestoneQuery.rows.length > 0) {
       const milestone = milestoneQuery.rows[0];
+
+      // Refresh ID card + QR for this user.
+      // If you have already updated users.business_level in another place,
+      // this function will still regenerate QR using current `business_level`.
+      // We therefore do a fresh read from DB.
+      // const userLevelRes = await client.query(
+      //   "SELECT business_level FROM users WHERE id = $1",
+      //   [userId],
+      // );
+      // const currentBusinessLevel = userLevelRes.rows[0]?.business_level;
+
+      try {
+        const userInfo = await db.query(
+          "SELECT u.id, u.full_name,u.referral_code, u.phone, u.business_level, l.level_name FROM users u left join level_commissions l on l.level_no = u.business_level WHERE u.id = $1",
+          [userId],
+        );
+
+        const user = userInfo.rows[0];
+
+        await generateAndSaveIdCard({
+          userId,
+          businessLevel: user.level_name,
+          fullName: user?.full_name,
+          referralCode: user?.referral_code,
+          phone: user?.phone,
+        });
+      } catch (e) {
+        // Do not fail order/commission if ID generation fails
+        console.error("ID card generation failed:", e);
+      }
 
       // 2. Update the Company Fund (Non-withdrawable)
       await client.query(
