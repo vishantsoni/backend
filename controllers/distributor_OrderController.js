@@ -662,6 +662,8 @@ exports.getRecievedOrder = async (req, res) => {
       whereClause += `  AND o.order_status = $${params.length}`;
     }
 
+    // whereClause += ` AND (o.order_for LIKE 'distributor_%' OR o.order_for ISNOT NULL)`;
+
     if (filter && filter !== "all") {
       if (filter === "my") {
         // Show only rows that ARE for a distributor
@@ -670,6 +672,7 @@ exports.getRecievedOrder = async (req, res) => {
         // Show rows that ARE NOT for a distributor OR are NULL
         whereClause += ` AND (o.order_for NOT LIKE 'distributor_%' OR o.order_for IS NULL)`;
       } else {
+        // whereClause += ` AND (o.order_for NOT LIKE 'distributor_%' OR o.order_for NOT NULL)`;
         // Specific ID match
         // params.push(filter);
         // whereClause += ` AND o.order_for = $${params.length}`;

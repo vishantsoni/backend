@@ -2,6 +2,7 @@ const express = require("express");
 const router = express.Router();
 const {
   getSalesReport,
+  getDistributorSalesReport,
   getProfitLossReport,
   getPurchaseReport,
   getGSTReport,
@@ -14,6 +15,9 @@ const isSuperAdmin = require("../middleware/isSuperAdmin");
 
 // @route   GET api/reports/sales
 router.get("/sales", authMiddleware, isSuperAdmin, getSalesReport);
+
+// @route   GET api/reports/distributor-sales
+router.get("/distributor-sales", authMiddleware, getDistributorSalesReport);
 
 // @route   GET api/reports/sales-excel
 router.get(

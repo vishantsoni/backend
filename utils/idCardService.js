@@ -93,18 +93,43 @@ async function generateAndSaveIdCard({
     "id-cards",
     String(userId),
   );
+
+  const frontCard = path.join(userDir, "front.jpg");
+  const backCard = path.join(userDir, "back.jpg");
+  const qrCodePath = path.join(userDir, "qr.png");
+
+  // --- NEW LOGIC: CHECK IF ALREADY EXISTS ---
+  try {
+    // We check for front.jpg as the indicator that the card set exists
+    await fs.access(frontCard);
+
+    // If access succeeds, file exists. Return the paths/URLs immediately.
+    return {
+      frontUrl: `${
+        process.env.APP_URL || ""
+      }/uploads/id-cards/${userId}/front.jpg`,
+      backUrl: `${
+        process.env.APP_URL || ""
+      }/uploads/id-cards/${userId}/back.jpg`,
+      qrUrl: `${process.env.APP_URL || ""}/uploads/id-cards/${userId}/qr.png`,
+      frontPath: frontCard,
+      backPath: backCard,
+      qrPath: qrCodePath,
+      alreadyExisted: true, // Optional flag for debugging
+    };
+  } catch (err) {
+    // throw new Error(
+    //   `ID card already exists for user ${userId}. To refresh, delete existing card first.`,
+    // ); // Or handle as needed
+  }
+
   await ensureDir(userDir);
 
   // Create deterministic front/back images from templates.
   // (Text/QR overlay upgrade requires canvas/sharp.)
   const { frontDest, backDest } = await copyTemplateToUserCard(userId);
-
-  // Render text onto template.
-  // Coordinates tuned for the provided demo template (id_card_front_demo.jpg).
-  // If you change templates later, these values may need adjustment.
-
-  // Generate level-aware QR.
   const { qrPath } = await generateIdCardQr({ userId, businessLevel });
+
   if (fullName || referralCode) {
     const frontImg = await loadImage(frontDest);
     const canvas = createCanvas(frontImg.width, frontImg.height);

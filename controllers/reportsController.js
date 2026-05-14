@@ -769,6 +769,124 @@ exports.exportGSTReportExcel = async (req, res) => {
 
 // Helper to build date range clause
 
+exports.getDistributorSalesReport = async (req, res) => {
+  try {
+    const { from, to } = req.query;
+
+    const { clause: dateClause, params: dateParams } = buildDateRange(
+      from,
+      to,
+      "o",
+    );
+
+    // Distributor sales (B2B): orders placed for distributor flow
+    const buildDistributorClause = " AND o.order_for LIKE 'distributor_%'";
+
+    const summaryQuery = `
+      SELECT 
+        COUNT(*)::int as total_orders,
+        COALESCE(SUM(o.total_amount), 0)::numeric(12,2) as total_revenue,
+        COALESCE(SUM(o.sub_total), 0)::numeric(12,2) as total_sub_total,
+        COALESCE(SUM(o.tax_amount), 0)::numeric(12,2) as total_tax,
+        COALESCE(SUM(o.shipping_charges), 0)::numeric(12,2) as total_shipping,
+        COALESCE(SUM(o.total_bv_points), 0)::int as total_bv_points,
+        COALESCE(AVG(o.total_amount), 0)::numeric(12,2) as avg_order_value
+      FROM orders o
+      WHERE 1=1
+      AND o.payment_status = 'paid'
+      ${buildDistributorClause}
+      ${from ? ` AND o.created_at >= '${from}'` : ""}
+      ${to ? ` AND o.created_at::date = '${to}'::date` : ""}
+    `;
+
+    const statusQuery = `
+      SELECT 
+        o.order_status,
+        COUNT(*)::int as count,
+        COALESCE(SUM(o.total_amount), 0)::numeric(12,2) as revenue
+      FROM orders o
+      WHERE 1=1
+      AND o.payment_status = 'paid'
+      ${buildDistributorClause}
+      ${from ? ` AND o.created_at >= '${from}'` : ""}
+      ${to ? ` AND o.created_at::date = '${to}'::date` : ""}
+      GROUP BY o.order_status
+      ORDER BY count DESC
+    `;
+
+    const paymentStatusQuery = `
+      SELECT 
+        o.payment_status,
+        COUNT(*)::int as count,
+        COALESCE(SUM(o.total_amount), 0)::numeric(12,2) as revenue
+      FROM orders o
+      WHERE 1=1
+      AND o.payment_status = 'paid'
+      ${buildDistributorClause}
+      ${from ? ` AND o.created_at >= '${from}'` : ""}
+      ${to ? ` AND o.created_at::date = '${to}'::date` : ""}
+      GROUP BY o.payment_status
+      ORDER BY count DESC
+    `;
+
+    const salesTrendQuery = `
+      SELECT 
+        COALESCE(DATE(o.created_at), CURRENT_DATE) as date,
+        COUNT(*)::int as orders,
+        COALESCE(SUM(o.total_amount), 0)::numeric(12,2) as revenue,
+        COALESCE(SUM(oi.total_item_bv), 0)::int as bv_points
+      FROM orders o
+      LEFT JOIN order_items oi ON o.id = oi.order_id
+      WHERE 1=1
+      AND o.payment_status = 'paid'
+      ${buildDistributorClause}
+      ${from ? ` AND o.created_at >= '${from}'` : ""}
+      ${to ? ` AND o.created_at::date = '${to}'::date` : ""}
+      GROUP BY DATE(o.created_at)
+      ORDER BY date DESC
+    `;
+
+    const topProductsQuery = `
+      SELECT 
+        oi.product_id,
+        oi.product_name,
+        SUM(oi.qty)::int as total_qty_sold,
+        COUNT(DISTINCT oi.order_id)::int as total_orders,
+        COALESCE(SUM(oi.total_item_price), 0)::numeric(12,2) as total_revenue
+      FROM order_items oi
+      JOIN orders o ON oi.order_id = o.id
+      WHERE 1=1
+      AND o.payment_status = 'paid'
+      ${buildDistributorClause}
+      ${from ? ` AND o.created_at >= '${from}'` : ""}
+      ${to ? ` AND o.created_at::date = '${to}'::date` : ""}
+      GROUP BY oi.product_id, oi.product_name
+      ORDER BY total_qty_sold DESC
+      LIMIT 10
+    `;
+
+    const summaryResult = await db.query(summaryQuery);
+    const statusResult = await db.query(statusQuery);
+    const paymentStatusResult = await db.query(paymentStatusQuery);
+    const salesTrendResult = await db.query(salesTrendQuery);
+    const topProductsResult = await db.query(topProductsQuery);
+
+    return res.json({
+      success: true,
+      data: {
+        summary: summaryResult.rows[0],
+        status_breakdown: statusResult.rows,
+        payment_status_breakdown: paymentStatusResult.rows,
+        daily_trend: salesTrendResult.rows,
+        top_products: topProductsResult.rows,
+      },
+    });
+  } catch (error) {
+    console.error("Error fetching distributor sales report:", error);
+    res.status(500).json({ success: false, message: "Server error" });
+  }
+};
+
 exports.exportSalesReportExcel = async (req, res) => {
   try {
     const { from, to } = req.query;
