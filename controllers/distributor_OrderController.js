@@ -263,6 +263,17 @@ const checkAndDistributeMilestone = async (
   }
 };
 
+const getShippingCharge = async (client) => {
+  const query =
+    "SELECT * FROM public.app_settings WHERE setting_key = 'shipping_charge'";
+  const res = await client.query(query);
+  if (res.rows.length > 0) {
+    return res.rows[0].setting_value.charge;
+  }
+
+  return 0;
+};
+
 exports.d_p_o = async (req, res) => {
   const client = await db.connect();
   try {
@@ -327,7 +338,10 @@ exports.d_p_o = async (req, res) => {
           `SELECT 
             p.id::text as sku, 
             t.tax_percentage as tax_rate,
-            p.base_price as price, 
+            CASE 
+              WHEN p.discounted_price > 0 THEN p.discounted_price 
+              ELSE p.base_price
+            END as price,
             null as bv_point, -- Changed from null to p.bv_point if simple products have points
             null as stock, 
             p.name as product_name, 
@@ -391,7 +405,7 @@ exports.d_p_o = async (req, res) => {
     // 2. Tax (simple 18% GST for now, link to tax_settings later)
 
     // 3. Shipping (flat 50 for now)
-    const shippingCharges = 50;
+    const shippingCharges = await getShippingCharge(client);
 
     // 4. Coupon discount (if provided)
     let discount = 0;

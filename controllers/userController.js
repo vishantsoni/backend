@@ -272,13 +272,17 @@ exports.getKycStatus = async (req, res) => {
   try {
     const userId = req.user.id;
     const result = await db.query(
-      "SELECT kyc_status FROM users WHERE id = $1",
+      "SELECT u.kyc_status, k.* FROM users u LEFT JOIN kyc_requests k ON k.user_id = u.id   WHERE u.id = $1",
       [userId],
     );
     if (result.rows.length === 0) {
       return res.status(404).json({ status: false, error: "User not found" });
     }
-    res.json({ status: true, kyc_status: result.rows[0].kyc_status });
+    res.json({
+      status: true,
+      kyc_status: result.rows[0].kyc_status,
+      data: result.rows[0],
+    });
   } catch (err) {
     console.error(err);
     res.status(500).json({ status: false, error: "Server error" });

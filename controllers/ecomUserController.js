@@ -320,3 +320,126 @@ exports.setDefaultAddress = async (req, res) => {
     res.status(500).json({ status: false, error: "Server error" });
   }
 };
+
+// =====================
+// ECOM USERS (Admin/Distributor)
+// =====================
+
+exports.getAllEcomUsersForSuperAdmin = async (req, res) => {
+  try {
+    const result = await db.query(
+      "SELECT id, name, email, phone, profile_image, distributor_code, status, email_verified_at, created_at FROM ecom_user ORDER BY created_at DESC",
+    );
+    res.json({ status: true, data: result.rows });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ status: false, error: "Server error" });
+  }
+};
+
+exports.updateEcomUserStatusForSuperAdmin = async (req, res) => {
+  try {
+    const { id } = req.params;
+    let { status } = req.body;
+
+    if (status === "true") status = true;
+    if (status === "false") status = false;
+
+    if (typeof status !== "boolean") {
+      return res
+        .status(400)
+        .json({ status: false, error: "Invalid status value" });
+    }
+
+    const result = await db.query(
+      "UPDATE ecom_user SET status = $1, updated_at = CURRENT_TIMESTAMP WHERE id = $2 RETURNING id, name, email, phone, profile_image, distributor_code, status, email_verified_at, created_at",
+      [status, id],
+    );
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ status: false, error: "User not found" });
+    }
+
+    res.json({ status: true, data: result.rows[0] });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ status: false, error: "Server error" });
+  }
+};
+
+// Distributor: get users where ecom_user.distributor_code = users.referral_code
+exports.getEcomUsersForDistributor = async (req, res) => {
+  try {
+    // authMiddleware sets req.user from `users` table in this project
+    const distributorUserId = req.user.id;
+
+    const distributorRes = await db.query(
+      "SELECT referral_code FROM users WHERE id = $1",
+      [distributorUserId],
+    );
+
+    if (distributorRes.rows.length === 0) {
+      return res
+        .status(404)
+        .json({ status: false, error: "Distributor not found" });
+    }
+
+    const referralCode = distributorRes.rows[0].referral_code;
+
+    const result = await db.query(
+      "SELECT id, name, email, phone, profile_image, distributor_code, status, email_verified_at, created_at FROM ecom_user WHERE distributor_code = $1 ORDER BY created_at DESC",
+      [referralCode],
+    );
+
+    res.json({ status: true, data: result.rows });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ status: false, error: "Server error" });
+  }
+};
+
+exports.updateEcomUserStatusForDistributor = async (req, res) => {
+  try {
+    const distributorUserId = req.user.id;
+    const { id } = req.params;
+
+    let { status } = req.body;
+    if (status === "true") status = true;
+    if (status === "false") status = false;
+
+    if (typeof status !== "boolean") {
+      return res
+        .status(400)
+        .json({ status: false, error: "Invalid status value" });
+    }
+
+    const distributorRes = await db.query(
+      "SELECT referral_code FROM users WHERE id = $1",
+      [distributorUserId],
+    );
+
+    if (distributorRes.rows.length === 0) {
+      return res
+        .status(404)
+        .json({ status: false, error: "Distributor not found" });
+    }
+
+    const referralCode = distributorRes.rows[0].referral_code;
+
+    const result = await db.query(
+      "UPDATE ecom_user SET status = $1, updated_at = CURRENT_TIMESTAMP WHERE id = $2 AND distributor_code = $3 RETURNING id, name, email, phone, profile_image, distributor_code, status, email_verified_at, created_at",
+      [status, id, referralCode],
+    );
+
+    if (result.rows.length === 0) {
+      return res
+        .status(404)
+        .json({ status: false, error: "User not found or not permitted" });
+    }
+
+    res.json({ status: true, data: result.rows[0] });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ status: false, error: "Server error" });
+  }
+};

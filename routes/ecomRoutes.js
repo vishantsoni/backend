@@ -3,8 +3,10 @@ const router = express.Router();
 
 const ecomAuth = require("../middleware/ecomAuth");
 const ecomIsAdmin = require("../middleware/ecomIsAdmin");
+const isSuperAdmin = require("../middleware/isSuperAdmin");
 
 // Controllers
+
 const {
   register,
   login,
@@ -18,7 +20,12 @@ const {
   updateAddress,
   deleteAddress,
   setDefaultAddress,
+  getAllEcomUsersForSuperAdmin,
+  updateEcomUserStatusForSuperAdmin,
+  getEcomUsersForDistributor,
+  updateEcomUserStatusForDistributor,
 } = require("../controllers/ecomUserController");
+
 const {
   getCart,
   addCartItem,
@@ -52,6 +59,39 @@ const authMiddleware = require("../middleware/authMiddleware");
 // Auth Routes (public)
 router.post("/auth/register", register);
 router.post("/auth/login", login);
+
+// =====================
+// ECOM USERS (Super Admin / Distributor)
+// =====================
+// Super Admin: get all ecom users
+router.get(
+  "/super/ecom-users",
+  authMiddleware,
+  isSuperAdmin,
+  getAllEcomUsersForSuperAdmin,
+);
+
+// Super Admin: update ecom user status
+router.patch(
+  "/super/ecom-users/:id/status",
+  authMiddleware,
+  isSuperAdmin,
+  updateEcomUserStatusForSuperAdmin,
+);
+
+// Distributor: get ecom users mapped by distributor_code == distributor.referral_code
+router.get(
+  "/distributor/ecom-users",
+  authMiddleware,
+  getEcomUsersForDistributor,
+);
+
+// Distributor: update ecom user status (scoped by distributor_code)
+router.patch(
+  "/distributor/ecom-users/:id/status",
+  authMiddleware,
+  updateEcomUserStatusForDistributor,
+);
 
 // Forget password (OTP) - minimal flow: send OTP + reset using identifier+otp+newPassword
 const {

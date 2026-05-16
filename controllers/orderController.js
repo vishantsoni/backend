@@ -934,10 +934,12 @@ exports.updateOrderStatus = async (req, res) => {
     // Validate status transitions (simple)
     const validStatuses = [
       "pending",
+      "packed",
       "processing",
-      "shipped",
+      "dispatched",
       "delivered",
       "cancelled",
+      "accepted",
     ];
     if (!validStatuses.includes(order_status)) {
       return res
@@ -946,8 +948,8 @@ exports.updateOrderStatus = async (req, res) => {
     }
 
     const result = await db.query(
-      "UPDATE orders SET order_status = $1, payment_status = $2, updated_at = CURRENT_TIMESTAMP WHERE id = $3 RETURNING *",
-      [order_status, payment_status || "paid", parseInt(id)],
+      "UPDATE orders SET order_status = $1, payment_status = $2, updated_at = CURRENT_TIMESTAMP WHERE order_id = $3 RETURNING *",
+      [order_status, payment_status || "paid", id],
     );
 
     if (result.rowCount === 0) {
