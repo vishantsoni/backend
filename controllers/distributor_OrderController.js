@@ -81,7 +81,7 @@ const distributeCommission = async (client, userId, body) => {
       if (newPairs > 0) {
         // C. Naya Logic: Find Pending Order in Opposite Leg
         const pendingMatch = await client.query(
-          `SELECT o.id, o.sub_total FROM orders o
+          `SELECT o.id, o.sub_total, o.total_amount FROM orders o
            JOIN users u ON o.distributor_id = u.id
            WHERE u.binary_path <@ $1 AND o.commission_status = 'pending'
            ORDER BY o.created_at ASC LIMIT 1`,
@@ -665,7 +665,7 @@ exports.getPlacedOrder = async (req, res) => {
 
 exports.getRecievedOrder = async (req, res) => {
   try {
-    const { page = 1, limit = 20, status, filter = "all" } = req.query;
+    const { page = 1, limit = 20, status } = req.query;
 
     const offset = (parseInt(page) - 1) * parseInt(limit);
     let whereClause = "WHERE 1=1";
@@ -676,22 +676,7 @@ exports.getRecievedOrder = async (req, res) => {
       whereClause += `  AND o.order_status = $${params.length}`;
     }
 
-    // whereClause += ` AND (o.order_for LIKE 'distributor_%' OR o.order_for ISNOT NULL)`;
-
-    if (filter && filter !== "all") {
-      if (filter === "my") {
-        // Show only rows that ARE for a distributor
-        whereClause += ` AND o.order_for LIKE 'distributor_%'`;
-      } else if (filter === "distributor") {
-        // Show rows that ARE NOT for a distributor OR are NULL
-        whereClause += ` AND (o.order_for NOT LIKE 'distributor_%' OR o.order_for IS NULL)`;
-      } else {
-        // whereClause += ` AND (o.order_for NOT LIKE 'distributor_%' OR o.order_for NOT NULL)`;
-        // Specific ID match
-        // params.push(filter);
-        // whereClause += ` AND o.order_for = $${params.length}`;
-      }
-    }
+    whereClause += ` AND (o.order_for = 'distributor_${req.user.id}' AND o.order_for IS NOT NULL)`;
 
     const ordersQuery = `
       SELECT 
@@ -738,7 +723,7 @@ exports.getRecievedOrder = async (req, res) => {
 
     res.json({
       success: true,
-      clause: ordersQuery,
+      clause: ordersQuery.replace("\n", " "),
       pagination: {
         page: parseInt(page),
         limit: parseInt(limit),

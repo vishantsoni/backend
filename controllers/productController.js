@@ -165,8 +165,13 @@ exports.getProducts = async (req, res) => {
         COUNT(v.id) AS variant_count,
         COALESCE(SUM(inv.quantity), 0) AS total_stock,
         -- New taxable_price index (Base Price + Tax)
-        ROUND(p.base_price * (1 + COALESCE(t.tax_percentage, 0) / 100.0), 2) AS taxable_price,
-        -- Tax Data JSON
+        -- Fixed taxable_price calculation (Checks discounted_price first)
+        ROUND(
+          CASE 
+            WHEN p.discounted_price > 0 THEN p.discounted_price 
+            ELSE p.base_price 
+          END * (1 + COALESCE(t.tax_percentage, 0) / 100.0), 2
+        ) AS taxable_price,
         CASE 
           WHEN p.tax_id IS NOT NULL THEN 
             JSON_BUILD_OBJECT(

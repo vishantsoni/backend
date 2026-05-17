@@ -86,64 +86,157 @@ exports.verifyOTP = async (req, res) => {
 exports.transferToUser = async (req, res) => {
   try {
     const userId = req.user.id;
-    const { toUserId, amount, remarks } = req.body;
+    const { toUserId, amount, remarks, pin } = req.body;
 
-    // Pre-checks
-    await limitsChecker.checkTransferLimits(userId, amount);
-
-    // KYC check (assume middleware or here)
-    const kyc = await db.query("SELECT kyc_status FROM users WHERE id = $1", [
-      userId,
-    ]);
-    if (!kyc.rows[0]?.kyc_status) {
+    // -------- Basic validation --------
+    if (!toUserId) {
       return res
         .status(400)
-        .json({ success: false, error: "KYC required for transactions" });
+        .json({ success: false, error: "toUserId is required" });
     }
 
-    // Balance check (use available_balance)
-    const balanceRes = await db.query(
-      `
-      SELECT COALESCE(total_amount, 0) + COALESCE(pending_amount, 0) as available FROM wallets WHERE user_id = $1
-    `,
-      [userId],
-    );
-    const available = parseFloat(balanceRes.rows[0]?.available || 0);
-    if (available < amount) {
+    const amountNum = Number(amount);
+    if (!Number.isFinite(amountNum)) {
       return res
         .status(400)
-        .json({ success: false, error: "Insufficient balance" });
+        .json({ success: false, error: "amount must be a number" });
+    }
+    if (amountNum <= 0) {
+      return res
+        .status(400)
+        .json({ success: false, error: "amount must be greater than 0" });
     }
 
-    // Use pending for commission-like holds? For transfer, deduct from total
-    // Assume simple: deduct total, credit receiver total (no hold for P2P, hold on commission)
+    if (userId === Number(toUserId)) {
+      return res.status(400).json({
+        success: false,
+        error: "toUserId must be different from sender",
+      });
+    }
+
+    if (!pin) {
+      return res.status(400).json({
+        success: false,
+        error: "Transaction PIN is required",
+      });
+    }
+    if (typeof pin !== "string" || !/^[0-9]{4,6}$/.test(pin)) {
+      return res.status(400).json({
+        success: false,
+        error: "PIN must be 4-6 digits",
+      });
+    }
+
+    // Pre-checks (limits)
+    await limitsChecker.checkTransferLimits(userId, amountNum);
+
     const client = await db.connect();
     try {
       await client.query("BEGIN");
 
-      // Deduct sender
+      // -------- Verify sender PIN --------
+      const senderPinRes = await client.query(
+        "SELECT transaction_pin_hash FROM users WHERE id = $1 FOR UPDATE",
+        [userId],
+      );
+      const senderPinHash = senderPinRes.rows[0]?.transaction_pin_hash;
+      if (!senderPinHash) {
+        await client.query("ROLLBACK");
+        return res.status(400).json({
+          success: false,
+          error: "Transaction PIN not set. Set PIN first.",
+        });
+      }
+
+      const pinOk = await bcrypt.compare(pin, senderPinHash);
+      if (!pinOk) {
+        await client.query("ROLLBACK");
+        return res.status(400).json({ success: false, error: "Invalid PIN" });
+      }
+
+      // -------- Validate receiver existence + KYC for BOTH --------
+      const usersKyc = await client.query(
+        "SELECT id, kyc_status FROM users WHERE id = $1 OR id = $2 FOR UPDATE",
+        [userId, toUserId],
+      );
+
+      if (usersKyc.rows.length < 2) {
+        await client.query("ROLLBACK");
+        return res
+          .status(400)
+          .json({ success: false, error: "Receiver user not found" });
+      }
+
+      const senderKyc = usersKyc.rows.find((r) => r.id === userId);
+      const receiverKyc = usersKyc.rows.find(
+        (r) => String(r.id) === String(toUserId),
+      );
+
+      if (!senderKyc?.kyc_status || !receiverKyc?.kyc_status) {
+        await client.query("ROLLBACK");
+        return res.status(400).json({
+          success: false,
+          error: "KYC required for transactions (both users)",
+        });
+      }
+
+      // -------- Balance check (available = total_amount + pending_amount) --------
+      const balanceRes = await client.query(
+        `
+          SELECT
+            COALESCE(total_amount, 0) + COALESCE(pending_amount, 0) AS available,
+            COALESCE(total_amount, 0) AS total_amount
+          FROM wallets
+          WHERE user_id = $1
+          FOR UPDATE
+        `,
+        [userId],
+      );
+
+      const available = parseFloat(balanceRes.rows[0]?.available || 0);
+      if (available < amountNum) {
+        await client.query("ROLLBACK");
+        return res.status(400).json({
+          success: false,
+          error: "Insufficient balance",
+        });
+      }
+
+      // Deduct from total_amount (existing logic). If total_amount alone is insufficient, reject.
+      const totalAmountOnly = parseFloat(balanceRes.rows[0]?.total_amount || 0);
+      if (totalAmountOnly < amountNum) {
+        await client.query("ROLLBACK");
+        return res.status(400).json({
+          success: false,
+          error:
+            "Insufficient withdrawable balance (insufficient total_amount)",
+        });
+      }
+
+      // -------- Perform wallet updates --------
       await client.query(
         "UPDATE wallets SET total_amount = total_amount - $1 WHERE user_id = $2",
-        [amount, userId],
+        [amountNum, userId],
       );
 
-      // Credit receiver
+      // Ensure receiver wallet row exists + credit
       await client.query(
         `
-        INSERT INTO wallets (user_id, total_amount) VALUES ($1, $2)
-        ON CONFLICT (user_id) DO UPDATE SET 
-          total_amount = wallets.total_amount + $2,
-          updated_at = CURRENT_TIMESTAMP
-      `,
-        [toUserId, amount],
+          INSERT INTO wallets (user_id, total_amount, pending_amount, left_count, right_count, paid_pairs, company_fund)
+          VALUES ($1, $2, 0, 0, 0, 0, 0)
+          ON CONFLICT (user_id) DO UPDATE SET
+            total_amount = wallets.total_amount + EXCLUDED.total_amount,
+            updated_at = CURRENT_TIMESTAMP
+        `,
+        [toUserId, amountNum],
       );
 
-      // Log txns
+      // -------- Log transactions --------
       const txnIdSender = await client.query(
         "INSERT INTO transactions (user_id, amount, type, category, source_user_id, remarks, status) VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING id",
         [
           userId,
-          amount,
+          amountNum,
           "debit",
           "transfer",
           toUserId,
@@ -156,7 +249,7 @@ exports.transferToUser = async (req, res) => {
         "INSERT INTO transactions (user_id, amount, type, category, source_user_id, remarks, status) VALUES ($1, $2, $3, $4, $5, $6, $7)",
         [
           toUserId,
-          amount,
+          amountNum,
           "credit",
           "transfer",
           userId,
@@ -166,7 +259,7 @@ exports.transferToUser = async (req, res) => {
       );
 
       // Update limits
-      await limitsChecker.updateTransferLimits(userId, amount);
+      await limitsChecker.updateTransferLimits(userId, amountNum);
 
       await client.query("COMMIT");
 
@@ -174,7 +267,7 @@ exports.transferToUser = async (req, res) => {
         success: true,
         message: "Transfer successful",
         txnId: txnIdSender.rows[0].id,
-        newBalance: available - amount,
+        newBalance: available - amountNum,
       });
     } catch (txnErr) {
       await client.query("ROLLBACK");
@@ -189,23 +282,46 @@ exports.transferToUser = async (req, res) => {
 };
 
 // Withdraw to bank (similar, but pending_amount move to total first? Add status 'pending_approval')
+
+const getTds = async (client) => {
+  const query =
+    "SELECT * FROM public.app_settings WHERE setting_key = 'tax_config'";
+  const res = await client.query(query);
+  if (res.rows.length > 0) {
+    return res.rows[0].setting_value.tds_percent;
+  }
+
+  return 0;
+};
 exports.withdraw = async (req, res) => {
   try {
     const userId = req.user.id;
-    const { amount, remarks } = req.body;
+    const { amount, remarks, pin } = req.body;
 
     // Same checks as transfer + bank details exist?
     await limitsChecker.checkTransferLimits(userId, amount);
 
     const user = await db.query(
-      "SELECT bank_name, account_no, ifsc_code FROM users WHERE id = $1",
+      "SELECT bank_name, account_no, ifsc_code, transaction_pin_hash FROM users WHERE id = $1",
       [userId],
     );
-    if (!user.rows[0]?.account_no) {
+    if (!user.rows[0]?.account_no || !user.rows[0].transaction_pin_hash) {
+      return res.status(400).json({
+        success: false,
+        error: "TPin and Bank details required",
+        data: user.rows[0],
+      });
+    }
+
+    const isMatch = await bcrypt.compare(
+      pin,
+      user.rows[0].transaction_pin_hash,
+    );
+
+    if (!isMatch)
       return res
         .status(400)
-        .json({ success: false, error: "Bank details required" });
-    }
+        .json({ success: false, error: "Invalid Transaction Pin" });
 
     // Balance check (only total_amount for withdraw)
     const balanceRes = await db.query(
@@ -218,6 +334,11 @@ exports.withdraw = async (req, res) => {
         .status(400)
         .json({ success: false, error: "Insufficient withdrawable balance" });
     }
+
+    // get tds
+    const tds_rate = await getTds(db);
+    const tds_amount = amount * (tds_rate / 100);
+    const d_amount = amount - tds_amount;
 
     const client = await db.connect();
     try {
@@ -234,10 +355,22 @@ exports.withdraw = async (req, res) => {
          VALUES ($1, $2, $3, $4, $5, $6) RETURNING id`,
         [
           userId,
-          amount,
+          d_amount,
           "debit",
           "withdraw",
           remarks || "Bank Withdrawal",
+          "pending_approval",
+        ],
+      );
+      const tdsId = await client.query(
+        `INSERT INTO transactions (user_id, amount, type, category, remarks, status) 
+         VALUES ($1, $2, $3, $4, $5, $6) RETURNING id`,
+        [
+          userId,
+          tds_amount,
+          "debit",
+          "withdraw",
+          "TDS Deduction_" + txnId.rows[0].id,
           "pending_approval",
         ],
       );
@@ -709,6 +842,158 @@ exports.listAllTransactionsForSuperAdmin = async (req, res) => {
     });
   } catch (err) {
     console.error(err);
+    res.status(500).json({ success: false, error: "Server error" });
+  }
+};
+
+exports.addTransaction = async (req, res) => {
+  try {
+    const {
+      deduction_from, // wallet field to update: total_amount | pending_amount | company_fund
+      amount,
+      category,
+      user_id,
+      type = "credit", // credit | debit
+      remarks,
+      status,
+    } = req.body;
+
+    // -------- Validation --------
+    if (user_id === undefined || user_id === null) {
+      return res
+        .status(400)
+        .json({ success: false, error: "user_id is required" });
+    }
+
+    const userId = Number(user_id);
+    if (!Number.isFinite(userId) || userId <= 0) {
+      return res.status(400).json({
+        success: false,
+        error: "user_id must be a valid positive number",
+      });
+    }
+
+    const amountNum = Number(amount);
+    if (!Number.isFinite(amountNum) || amountNum <= 0) {
+      return res.status(400).json({
+        success: false,
+        error: "amount must be a valid positive number",
+      });
+    }
+
+    const allowedWalletFields = ["total_amount", "company_fund"];
+    if (!allowedWalletFields.includes(deduction_from)) {
+      return res.status(400).json({
+        success: false,
+        error: `deduction_from must be one of: ${allowedWalletFields.join(
+          ", ",
+        )}`,
+      });
+    }
+
+    const finalType = type ? String(type) : "credit";
+    if (!["credit", "debit"].includes(finalType)) {
+      return res.status(400).json({
+        success: false,
+        error: "type must be either 'credit' or 'debit'",
+      });
+    }
+
+    const finalCategory = category ? String(category) : null;
+    if (!finalCategory) {
+      return res
+        .status(400)
+        .json({ success: false, error: "category is required" });
+    }
+
+    // status is optional in some flows; default to 'completed'
+    const finalStatus = status ? String(status) : "completed";
+
+    const field = String(deduction_from);
+    const sign = finalType === "credit" ? 1 : -1;
+
+    const client = await db.connect();
+    try {
+      await client.query("BEGIN");
+
+      // Lock wallet row
+      const walletRes = await client.query(
+        `
+          SELECT total_amount, pending_amount, company_fund
+          FROM wallets
+          WHERE user_id = $1
+          FOR UPDATE
+        `,
+        [userId],
+      );
+
+      if (!walletRes.rows[0]) {
+        await client.query("ROLLBACK");
+        return res.status(404).json({
+          success: false,
+          error: "Wallet not found for user",
+        });
+      }
+
+      const currentVal = Number(walletRes.rows[0][field] ?? 0);
+      const newVal = currentVal + sign * amountNum;
+
+      if (finalType === "debit" && newVal < 0) {
+        await client.query("ROLLBACK");
+        return res.status(400).json({
+          success: false,
+          error: `Insufficient ${field} balance`,
+        });
+      }
+
+      // Update the correct wallet column
+      await client.query(
+        `UPDATE wallets
+         SET ${field} = ${field} + $1,
+             updated_at = CURRENT_TIMESTAMP
+         WHERE user_id = $2`,
+        [sign * amountNum, userId],
+      );
+
+      // Insert transaction record (using existing columns pattern from this controller)
+      const txnInsert = await client.query(
+        `
+          INSERT INTO transactions (user_id, amount, type, category, remarks, status)
+          VALUES ($1, $2, $3, $4, $5, $6)
+          RETURNING id
+        `,
+        [
+          userId,
+          amountNum,
+          finalType,
+          finalCategory,
+          remarks || null,
+          finalStatus,
+        ],
+      );
+
+      await client.query("COMMIT");
+
+      // Return updated wallet snapshot
+      const updatedWalletRes = await db.query(
+        `SELECT total_amount, pending_amount, company_fund FROM wallets WHERE user_id = $1`,
+        [userId],
+      );
+
+      return res.json({
+        success: true,
+        message: "Transaction added and wallet updated",
+        txnId: txnInsert.rows[0].id,
+        wallet: updatedWalletRes.rows[0] || null,
+      });
+    } catch (err) {
+      await client.query("ROLLBACK");
+      throw err;
+    } finally {
+      client.release();
+    }
+  } catch (error) {
+    console.log("error - ", error);
     res.status(500).json({ success: false, error: "Server error" });
   }
 };

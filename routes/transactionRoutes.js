@@ -3,7 +3,8 @@ const router = express.Router();
 const transactionController = require("../controllers/transactionController");
 const userController = require("../controllers/userController");
 const authMiddleware = require("../middleware/authMiddleware");
-const kycMiddleware = require("../middleware/kycMiddleware"); // Assume exists or use in controller
+// const kycMiddleware = require("../middleware/kycMiddleware"); // unused
+
 const isSuperAdmin = require("../middleware/isSuperAdmin");
 
 // Transaction PIN & OTP
@@ -17,6 +18,11 @@ router.post("/change-password", authMiddleware, userController.changePassword);
 
 // Main transactions (call verify-pin/otp client-side first or add middleware)
 router.post("/transfer", authMiddleware, transactionController.transferToUser);
+router.post(
+  "/add-transaction",
+  [authMiddleware, isSuperAdmin],
+  transactionController.addTransaction,
+);
 router.post("/withdraw", authMiddleware, transactionController.withdraw);
 
 // Super Admin: All transactions

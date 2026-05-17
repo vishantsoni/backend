@@ -1,13 +1,9 @@
-# TODO - Dashboard split (distributor vs ecom_user)
+# TODO
 
-- [ ] Update `controllers/dashboardController.js`:
-
-  - [ ] Add `getDashboardDataV2` function for testing (split)
-
-- [x] Implement `distributor` and `ecom_user` sections in response under `data.distributor` and `data.ecom_user`
-
-  - [ ] Keep existing `getDashboardData` unchanged for backward compatibility (option B)
-
-- [x] Add/adjust route in `routes/dashboardRoutes.js` to expose `getDashboardDataV2` for testing
-
-- [ ] Run a quick node lint/test command (or at least start server) to ensure no syntax errors
+- [x] Implement `exports.addTransaction` in `controllers/transactionController.js`.
+  - [x] Validate request body fields (user_id, amount, deduction_from, type, category, status, remarks).
+  - [x] Use DB transaction (`BEGIN/COMMIT/ROLLBACK`).
+  - [x] Lock wallet row with `SELECT ... FOR UPDATE`.
+  - [x] Update `wallets.total_amount` / `wallets.pending_amount` / `wallets.company_fund` based on `deduction_from` and `type`.
+  - [x] Insert a row into `transactions` using existing column pattern used elsewhere in this controller.
+  - [x] Return success response with `txnId` and updated wallet balances.

@@ -311,6 +311,16 @@ console.log(generateOrderId()); // Outputs: ORD-260509-C-XXXX
 //   }
 // };
 
+const getShippingCharge = async (client) => {
+  const query =
+    "SELECT * FROM public.app_settings WHERE setting_key = 'shipping_charge'";
+  const res = await client.query(query);
+  if (res.rows.length > 0) {
+    return res.rows[0].setting_value.charge;
+  }
+
+  return 0;
+};
 exports.placeOrder = async (req, res) => {
   const client = await db.connect();
   try {
@@ -343,48 +353,22 @@ exports.placeOrder = async (req, res) => {
     for (const item of items) {
       const { product_id, variation_id, quantity: qty } = item;
 
-      // const productQuery = variation_id
-      //   ? `SELECT pv.sku, pv.price, pv.bv_point, p.name as product_name, p.f_image ,
-      //   CASE
-      //     WHEN p.tax_id IS NOT NULL THEN
-      //       jsonb_build_object(
-      //         'id', t.id,
-      //         'name', t.tax_name,
-      //         'percentage', t.tax_percentage
-      //       )
-      //     ELSE NULL
-      //   END AS tax_data
-      //    FROM pro_variants pv
-      //    JOIN products p ON pv.product_id = p.id
-      //    LEFT JOIN tax_settings t ON p.tax_id = t.id
-      //    WHERE pv.id = $1 AND p.status = 'active'`
-      //   : `SELECT
-      //         p.id::text as sku,
-      //         p.base_price as price,
-      //         COALESCE(p.bv_point, 0) as bv_point, -- Product level BV (with fallback to 0)
-      //         p.name as product_name,
-      //         p.f_image,
-      //         CASE
-      //           WHEN p.tax_id IS NOT NULL THEN
-      //             jsonb_build_object(
-      //               'id', t.id,
-      //               'name', t.tax_name,
-      //               'percentage', t.tax_percentage
-      //             )
-      //           ELSE NULL
-      //         END AS tax_data
-      //     FROM products p
-      //     LEFT JOIN tax_settings t ON p.tax_id = t.id
-      //     WHERE p.id = $1 AND p.status = 'active'`;
-
       const productQuery = variation_id
         ? `SELECT pv.sku, pv.price, pv.bv_point, p.name as product_name, p.f_image, t.tax_percentage
            FROM pro_variants pv 
            JOIN products p ON pv.product_id = p.id 
            LEFT JOIN tax_settings t ON p.tax_id = t.id
            WHERE pv.id = $1 AND p.status = 'active'`
-        : `SELECT p.id::text as sku, p.base_price as price, 0 as bv_point, 
-           p.name as product_name, p.f_image, t.tax_percentage
+        : `SELECT 
+              p.id::text as sku, 
+              CASE 
+                WHEN p.discounted_price > 0 THEN p.discounted_price 
+                ELSE p.base_price
+              END as price,
+              0 as bv_point, 
+              p.name as product_name, 
+              p.f_image, 
+              t.tax_percentage
            FROM products p
            LEFT JOIN tax_settings t ON p.tax_id = t.id
            WHERE p.id = $1 AND p.status = 'active'`;
@@ -446,7 +430,7 @@ exports.placeOrder = async (req, res) => {
     }
 
     // 3. Tax & Shipping (Simple Logic)
-    const shippingCharges = 50;
+    const shippingCharges = await getShippingCharge(client);
     const taxAmount = Math.round(totalTax * 100) / 100;
     const totalAmount = subTotal + taxAmount + shippingCharges;
 
@@ -454,8 +438,8 @@ exports.placeOrder = async (req, res) => {
     const orderRef = generateOrderId();
     const orderInsert = await client.query(
       `INSERT INTO orders (order_id, user_id, distributor_id, sub_total, 
-      tax_amount, shipping_charges, total_amount, total_bv_points, shipping_address, payment_method, order_status)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, 'pending') RETURNING id`,
+      tax_amount, shipping_charges, total_amount, total_bv_points, shipping_address, payment_method, order_status, order_for)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, 'pending', $11) RETURNING id`,
       [
         orderRef,
         userId,
@@ -467,6 +451,7 @@ exports.placeOrder = async (req, res) => {
         totalBV,
         shipping_address,
         payment_method,
+        order_for,
       ],
     );
     const dbOrderId = orderInsert.rows[0].id;
@@ -543,69 +528,6 @@ exports.placeOrder = async (req, res) => {
     client.release();
   }
 };
-
-// User/Admin: Get my orders
-// exports.getMyOrders = async (req, res) => {
-//   try {
-//     const userId = req.user.id;
-//     const { page = 1, limit = 10, status } = req.query;
-//     const offset = (parseInt(page) - 1) * parseInt(limit);
-
-//     // Initial parameters
-//     const params = [userId];
-//     let whereClause = "WHERE o.user_id = $1";
-
-//     if (status) {
-//       params.push(status);
-//       whereClause += ` AND o.order_status = $${params.length}`;
-//     }
-
-//     // Main Query
-//     const ordersQuery = `
-//       SELECT o.*,
-//              COUNT(oi.id)::int as items_count,
-//              COALESCE(SUM(oi.total_item_price), 0) as items_total,
-//              oi.product_name, oi.product_image
-//       FROM orders o
-//       LEFT JOIN order_items oi ON o.id = oi.order_id
-//       ${whereClause}
-//       GROUP BY o.id, oi.product_name, oi.product_image
-//       ORDER BY o.created_at DESC
-//       LIMIT $${params.length + 1} OFFSET $${params.length + 2}
-//     `;
-
-//     const orders = await db.query(ordersQuery, [
-//       ...params,
-//       parseInt(limit),
-//       offset,
-//     ]);
-
-//     // Error Fix Here: Added "o" alias to orders table
-//     const countWhereClause = whereClause.replace(/o\./g, ""); // "o." hata diya kyunki yahan alias ki zaroorat nahi agar single table hai
-//     // YA phir alias de do:
-//     const totalRes = await db.query(
-//       `SELECT COUNT(*)::int FROM orders o ${whereClause}`, // Added "o" here
-//       params,
-//     );
-
-//     res.json({
-//       success: true,
-//       data: orders.rows,
-//       total: totalRes.rows[0].count, // Frontend compatibility ke liye
-//       page: parseInt(page),
-//       limit: parseInt(limit),
-//       pagination: {
-//         page: parseInt(page),
-//         limit: parseInt(limit),
-//         total: totalRes.rows[0].count,
-//         pages: Math.ceil(totalRes.rows[0].count / parseInt(limit)),
-//       },
-//     });
-//   } catch (error) {
-//     console.error(error);
-//     res.status(500).json({ success: false, message: "Server error" });
-//   }
-// };
 
 exports.getMyOrders = async (req, res) => {
   try {
@@ -696,10 +618,11 @@ exports.getAllOrders = async (req, res) => {
     if (filter && filter !== "all") {
       if (filter === "my") {
         // Show only rows that ARE for a distributor
-        whereClause += ` AND o.order_for LIKE 'distributor_%'`;
+        whereClause += ` AND o.order_for IS NULL OR o.order_for = 'admin'`;
       } else if (filter === "distributor") {
-        // Show rows that ARE NOT for a distributor OR are NULL
-        whereClause += ` AND (o.order_for NOT LIKE 'distributor_%' OR o.order_for IS NULL)`;
+        // Show rows that ARE NOT for a distributor OR are NULL admin-distributor
+        whereClause += ` AND o.order_for = 'admin-distributor'`;
+        // whereClause += ` AND (o.order_for NOT LIKE 'distributor_%' OR o.order_for IS NULL)`;
       } else {
         // Specific ID match
         params.push(filter);
@@ -707,44 +630,7 @@ exports.getAllOrders = async (req, res) => {
       }
     }
 
-    // const ordersQuery = `
-    //   SELECT
-    //     o.*,
-    //     CASE
-    //       WHEN o.user_id IS NOT NULL THEN 'User'
-    //       WHEN o.distributor_id IS NOT NULL THEN 'Distributor'
-    //       ELSE 'Unknown'
-    //     END as user_type,
-    //     -- Pick distributor name if user_name is null, and vice versa
-    //     COALESCE(u.name, d.full_name, d.username) as user_name,
-    //     COALESCE(u.phone, d.phone) as user_phone,
-
-    //     COALESCE(
-    //       (SELECT json_agg(items)::jsonb
-    //       FROM (
-    //         SELECT
-    //           oi.id,
-    //           oi.product_name,
-    //           oi.product_image,
-    //           oi.variant_sku,
-    //           oi.variant_details,
-    //           oi.qty,
-    //           oi.unit_price,
-    //           oi.total_item_price
-    //         FROM order_items oi
-    //         WHERE oi.order_id = o.id
-    //       ) items
-    //       ), '[]'::jsonb
-    //     ) as products,
-    //     (SELECT COUNT(*)::int FROM order_items WHERE order_id = o.id) as item_count
-    //   FROM orders o
-    //   -- Use LEFT JOIN because an order might not have one of these
-    //   LEFT JOIN ecom_user u ON o.user_id = u.id
-    //   LEFT JOIN users d ON o.distributor_id = d.id
-    //   ${whereClause}
-    //   ORDER BY o.created_at DESC
-    //   LIMIT $${params.length + 1} OFFSET $${params.length + 2}
-    // `;
+    // console.log("filter - ", filter, whereClause);
 
     const ordersQuery = `
       SELECT 
@@ -757,6 +643,16 @@ exports.getAllOrders = async (req, res) => {
         -- Priority: ecom_user name > distributor full_name > distributor username
         COALESCE(u.name, d.full_name, d.username) as user_name, 
         COALESCE(u.phone, d.phone) as user_phone,
+        CASE 
+          WHEN o.distributor_id IS NOT NULL AND o.order_for LIKE 'distributor_%' THEN 
+            JSON_BUILD_OBJECT(
+              'id', d.id,
+              'name', COALESCE(d.full_name, d.username),
+              'phone', d.phone,
+              'username', d.username
+            )
+          ELSE NULL 
+        END as distributor,
         COALESCE(
           (SELECT json_agg(items)::jsonb 
            FROM (
@@ -769,6 +665,7 @@ exports.getAllOrders = async (req, res) => {
            ) items
           ), '[]'::jsonb
         ) as products,
+
         (SELECT COUNT(*)::int FROM order_items WHERE order_id = o.id) as item_count
       FROM orders o 
       LEFT JOIN ecom_user u ON o.user_id = u.id
@@ -777,6 +674,8 @@ exports.getAllOrders = async (req, res) => {
       ORDER BY o.created_at DESC 
       LIMIT $${params.length + 1} OFFSET $${params.length + 2}
     `;
+
+    // console.log("query - ", ordersQuery);
 
     const orders = await db.query(ordersQuery, [
       ...params,
@@ -929,7 +828,7 @@ GROUP BY o.id, u.id, d.id;
 exports.updateOrderStatus = async (req, res) => {
   try {
     const { id } = req.params;
-    const { order_status, payment_status, remarks } = req.body;
+    const { order_status, remarks } = req.body;
 
     // Validate status transitions (simple)
     const validStatuses = [
@@ -947,10 +846,9 @@ exports.updateOrderStatus = async (req, res) => {
         .json({ success: false, message: "Invalid status" });
     }
 
-    const result = await db.query(
-      "UPDATE orders SET order_status = $1, payment_status = $2, updated_at = CURRENT_TIMESTAMP WHERE order_id = $3 RETURNING *",
-      [order_status, payment_status || "paid", id],
-    );
+    let query = `UPDATE orders SET order_status = $1, updated_at = CURRENT_TIMESTAMP WHERE order_id = $2 RETURNING *`;
+
+    const result = await db.query(query, [order_status, id]);
 
     if (result.rowCount === 0) {
       return res

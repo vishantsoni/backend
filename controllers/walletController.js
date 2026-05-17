@@ -11,6 +11,7 @@ exports.getBalance = async (req, res) => {
     -- Amount to UV Conversion (Amount / 10)
     (COALESCE(w.total_amount, 0) / 10.0) as total_balance,
     (COALESCE(w.pending_amount, 0) / 10.0) as pending_balance,
+    (COALESCE(w.company_fund, 0) / 10.0) as company_balance,
     -- Available Balance in UV
     ((COALESCE(w.total_amount, 0) + COALESCE(w.pending_amount, 0)) / 10.0) as available_balance,
     (SELECT COUNT(*) FROM transactions WHERE user_id = $1) as total_transactions
