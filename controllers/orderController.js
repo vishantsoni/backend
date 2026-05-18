@@ -321,6 +321,282 @@ const getShippingCharge = async (client) => {
 
   return 0;
 };
+// exports.placeOrder = async (req, res) => {
+//   const client = await db.connect();
+//   try {
+//     await client.query("BEGIN");
+
+//     const userId = req.user.id;
+//     const {
+//       items, // [{product_id, variation_id, quantity}]
+//       shipping_address,
+//       coupon_code,
+//       payment_method = "wallet",
+//       order_for = "admin",
+//       distributor_id, // Explicitly passed from frontend
+//     } = req.body;
+
+//     if (!items || !Array.isArray(items) || items.length === 0) {
+//       throw new Error("Items required");
+//     }
+
+//     // 1. Target Distributor Identify karein (Fallback Logic)
+//     let targetDistributorId = distributor_id ? parseInt(distributor_id) : 0;
+//     // Default to 0 (Main Warehouse) if nothing is provided
+
+//     let subTotal = 0;
+//     let totalTax = 0; // Dynamic Tax Accumulator
+//     let totalBV = 0;
+//     const validatedItems = [];
+
+//     // 2. Validate Items & Fetch Prices
+//     for (const item of items) {
+//       const { product_id, variation_id, quantity: qty, tax_data } = item;
+
+//       // const productQuery = variation_id
+//       //   ? `SELECT pv.sku, pv.price, pv.bv_point, p.name as product_name,
+//       //   p.f_image, t.tax_percentage
+//       //      FROM pro_variants pv
+//       //      JOIN products p ON pv.product_id = p.id
+//       //      LEFT JOIN tax_settings t ON p.tax_id = t.id
+//       //      WHERE pv.id = $1 AND p.status = 'active'`
+//       //   : `SELECT
+//       //         p.id::text as sku,
+//       //         CASE
+//       //           WHEN p.discounted_price > 0 THEN p.discounted_price
+//       //           ELSE p.base_price
+//       //         END as price,
+//       //         0 as bv_point,
+//       //         p.name as product_name,
+//       //         p.f_image,
+//       //         t.tax_percentage
+//       //      FROM products p
+//       //      LEFT JOIN tax_settings t ON p.tax_id = t.id
+//       //      WHERE p.id = $1 AND p.status = 'active'`;
+
+//       // const pRes = await client.query(productQuery, [
+//       //   variation_id || product_id,
+//       // ]);
+//       // const productData = pRes.rows[0];
+
+//       let productData;
+//       let taxRate = 0;
+
+//       if (variation_id) {
+//         // --- CASE 1: Variable Product ---
+//         const variantRes = await client.query(
+//           `SELECT pv.sku, pv.price, pv.bv_point, pv.stock, p.name as product_name,
+//               p.f_image as product_image,
+//               t.tax_percentage as tax_rate,
+//               COALESCE((
+//                 SELECT jsonb_agg(
+//                   jsonb_build_object(
+//                     'attr_id', av.attr_id,
+//                     'attr_value_id', vam.attr_value_id,
+//                     'value', av.value
+//                   ) ORDER BY av.attr_id
+//                 )
+//                 FROM variant_attr_mapping vam
+//                 JOIN attr_values av ON vam.attr_value_id = av.id
+//                 WHERE vam.variant_id = pv.id
+//               ), '[]'::jsonb) as attributes
+//               FROM pro_variants pv
+//               JOIN products p ON pv.product_id = p.id
+//               LEFT JOIN tax_settings t ON t.id = p.tax_id
+//               WHERE pv.id = $1 AND p.id = $2 AND p.status = 'active'`,
+//           [variation_id, product_id],
+//         );
+//         productData = variantRes.rows[0];
+//       } else {
+//         // --- CASE 2: Simple Product (No Variation) ---
+//         // --- CASE 2: Simple Product (No Variation) ---
+//         const productRes = await client.query(
+//           `SELECT
+//             p.id::text as sku,
+//             t.tax_percentage as tax_rate,
+//             CASE
+//               WHEN p.discounted_price > 0 THEN p.discounted_price
+//               ELSE p.base_price
+//             END as price,
+//             null as bv_point, -- Changed from null to p.bv_point if simple products have points
+//             null as stock,
+//             p.name as product_name,
+//             p.f_image as product_image,
+//             '[]'::jsonb as attributes,
+//             -- Also build the tax_data object here to store in variant_details
+//             jsonb_build_object(
+//               'id', t.id,
+//               'name', t.tax_name,
+//               'percentage', t.tax_percentage
+//             ) as tax_info
+//           FROM products p
+//           LEFT JOIN tax_settings t ON t.id = p.tax_id
+//           WHERE p.id = $1 AND p.status = 'active'`, // Fixed ambiguous reference
+//           [product_id],
+//         );
+//         productData = productRes.rows[0];
+//       }
+
+//       if (!productData)
+//         throw new Error(`Product/Variant ${product_id} not active.`);
+
+//       taxRate = parseFloat(productData.tax_rate);
+//       // --- INVENTORY CHECK WITH FALLBACK (ID: distributor_id OR 0) ---
+//       const invRes = await client.query(
+//         `SELECT distributor_id, quantity FROM distributor_inventory
+//          WHERE product_id = $1 AND (variant_id = $2 OR (variant_id IS NULL AND $2 IS NULL))
+//          AND (distributor_id = $3 OR distributor_id = 0)
+//          ORDER BY (distributor_id = $3) DESC`, // Taaki specific distributor pehle aaye
+//         [product_id, variation_id || null, targetDistributorId],
+//       );
+
+//       // Check Specific Distributor first, then Main Warehouse
+//       let specificDistStock = invRes.rows.find(
+//         (r) => r.distributor_id == targetDistributorId,
+//       );
+//       let mainWarehouseStock = invRes.rows.find((r) => r.distributor_id == 0);
+
+//       let finalStockSource = null;
+
+//       if (specificDistStock && specificDistStock.quantity >= qty) {
+//         finalStockSource = targetDistributorId;
+//       } else if (mainWarehouseStock && mainWarehouseStock.quantity >= qty) {
+//         finalStockSource = 0;
+//       } else {
+//         throw new Error(`Insufficient stock for ${productData.product_name}.`);
+//       }
+
+//       const price = parseFloat(productData.price);
+//       const taxPercent = parseFloat(taxRate || 0);
+//       const itemTax = ((price * taxPercent) / 100) * qty;
+//       const itemTotal = price * qty;
+//       const itemBV = (productData.bv_point || 0) * qty;
+
+//       validatedItems.push({
+//         product_id,
+//         variant_id: variation_id || null,
+//         variant_details: {
+//           price: productData.price,
+//           bv_point: productData.bv_point,
+//           tax_data: tax_data,
+//           attributes: productData.attributes || [],
+//         },
+//         qty,
+//         unit_price: productData.price,
+//         total_item_price: itemTotal,
+//         total_item_bv: itemBV,
+//         stock_source: finalStockSource, // Track kahan se stock katna hai
+//         product_name: productData.product_name,
+//         product_image: productData.f_image,
+//       });
+
+//       subTotal += itemTotal;
+//       totalTax += itemTax; // Add to global order tax
+//       totalBV += itemBV;
+//     }
+
+//     // 3. Tax & Shipping (Simple Logic)
+//     const shippingCharges = await getShippingCharge(client);
+//     const taxAmount = Math.round(totalTax * 100) / 100;
+//     const totalAmount = subTotal + taxAmount + shippingCharges;
+
+//     // 4. Create Order
+//     const orderRef = generateOrderId();
+//     const orderInsert = await client.query(
+//       `INSERT INTO orders (order_id, user_id, distributor_id, sub_total,
+//       tax_amount, shipping_charges, total_amount, total_bv_points, shipping_address, payment_method, order_status, order_for)
+//        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, 'pending', $11) RETURNING id`,
+//       [
+//         orderRef,
+//         userId,
+//         targetDistributorId,
+//         subTotal,
+//         taxAmount,
+//         shippingCharges,
+//         totalAmount,
+//         totalBV,
+//         shipping_address,
+//         payment_method,
+//         order_for,
+//       ],
+//     );
+//     const dbOrderId = orderInsert.rows[0].id;
+
+//     // 5. Insert Items & UPDATE INVENTORY (Deduction)
+//     for (const item of validatedItems) {
+//       // Order Item Insert
+//       // await client.query(
+//       //   `INSERT INTO order_items (order_id, product_id, variant_id, product_name, qty, unit_price, total_item_price, stock_source)
+//       //    VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+//       //   [
+//       //     dbOrderId,
+//       //     item.product_id,
+//       //     item.variant_id,
+//       //     item.product_name,
+//       //     item.qty,
+//       //     item.unit_price,
+//       //     item.total_item_price,
+//       //     item.stock_source,
+//       //   ],
+//       // );
+//       await client.query(
+//         `INSERT INTO order_items (
+//         order_id, product_id, variant_id, product_name,
+//         variant_details
+//         qty, unit_price, unit_bv_points, total_item_price,
+//         total_item_bv, stock_source, product_image
+//      )
+//      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`,
+//         [
+//           dbOrderId,
+//           item.product_id,
+//           item.variant_id,
+//           item.product_name,
+//           item.variant_details,
+//           item.qty,
+//           item.unit_price,
+//           item.unit_bv_points || 0, // unit_bv_points handle kiya
+//           item.total_item_price,
+//           item.total_item_bv || 0, // total_item_bv handle kiya (Error Fix)
+//           item.stock_source,
+//           item.product_image,
+//         ],
+//       );
+
+//       // Inventory Deduct (Use finalStockSource identified earlier)
+//       const deductRes = await client.query(
+//         `UPDATE distributor_inventory
+//          SET quantity = quantity - $1, updated_at = CURRENT_TIMESTAMP
+//          WHERE product_id = $2 AND (variant_id = $3 OR (variant_id IS NULL AND $3 IS NULL))
+//          AND distributor_id = $4 RETURNING quantity`,
+//         [item.qty, item.product_id, item.variant_id, item.stock_source],
+//       );
+
+//       if (deductRes.rowCount === 0)
+//         throw new Error(`Inventory update failed for ${item.product_name}`);
+//     }
+
+//     // 6. Optional: Clear Cart after success
+//     await client.query(
+//       `DELETE FROM e_cart_items WHERE cart_id = (SELECT id FROM e_carts WHERE user_id = $1)`,
+//       [userId],
+//     );
+
+//     await client.query("COMMIT");
+//     res.status(200).json({
+//       success: true,
+//       message: "Order placed successfully",
+//       order_id: orderRef,
+//     });
+//   } catch (error) {
+//     await client.query("ROLLBACK");
+//     console.error("Order Place Error:", error.message);
+//     res.status(400).json({ success: false, message: error.message });
+//   } finally {
+//     client.release();
+//   }
+// };
+
 exports.placeOrder = async (req, res) => {
   const client = await db.connect();
   try {
@@ -342,7 +618,6 @@ exports.placeOrder = async (req, res) => {
 
     // 1. Target Distributor Identify karein (Fallback Logic)
     let targetDistributorId = distributor_id ? parseInt(distributor_id) : 0;
-    // Default to 0 (Main Warehouse) if nothing is provided
 
     let subTotal = 0;
     let totalTax = 0; // Dynamic Tax Accumulator
@@ -353,44 +628,86 @@ exports.placeOrder = async (req, res) => {
     for (const item of items) {
       const { product_id, variation_id, quantity: qty } = item;
 
-      const productQuery = variation_id
-        ? `SELECT pv.sku, pv.price, pv.bv_point, p.name as product_name, p.f_image, t.tax_percentage
-           FROM pro_variants pv 
-           JOIN products p ON pv.product_id = p.id 
-           LEFT JOIN tax_settings t ON p.tax_id = t.id
-           WHERE pv.id = $1 AND p.status = 'active'`
-        : `SELECT 
-              p.id::text as sku, 
-              CASE 
-                WHEN p.discounted_price > 0 THEN p.discounted_price 
-                ELSE p.base_price
-              END as price,
-              0 as bv_point, 
-              p.name as product_name, 
-              p.f_image, 
-              t.tax_percentage
-           FROM products p
-           LEFT JOIN tax_settings t ON p.tax_id = t.id
-           WHERE p.id = $1 AND p.status = 'active'`;
+      let productData;
+      let taxRate = 0;
+      let taxInfoObj = null;
 
-      const pRes = await client.query(productQuery, [
-        variation_id || product_id,
-      ]);
-      const productData = pRes.rows[0];
+      if (variation_id) {
+        // --- CASE 1: Variable Product ---
+        const variantRes = await client.query(
+          `SELECT pv.sku, pv.price, pv.bv_point, pv.stock, p.name as product_name, 
+              p.f_image as product_image,
+              t.tax_percentage as tax_rate,
+              jsonb_build_object(
+                'id', t.id,
+                'name', t.tax_name,
+                'percentage', t.tax_percentage
+              ) as tax_info,
+              COALESCE((
+                SELECT jsonb_agg(
+                  jsonb_build_object(
+                    'attr_id', av.attr_id,
+                    'attr_value_id', vam.attr_value_id, 
+                    'value', av.value
+                  ) ORDER BY av.attr_id
+                )
+                FROM variant_attr_mapping vam
+                JOIN attr_values av ON vam.attr_value_id = av.id 
+                WHERE vam.variant_id = pv.id
+              ), '[]'::jsonb) as attributes
+              FROM pro_variants pv 
+              JOIN products p ON pv.product_id = p.id 
+              LEFT JOIN tax_settings t ON t.id = p.tax_id 
+              WHERE pv.id = $1 AND p.id = $2 AND p.status = 'active'`,
+          [variation_id, product_id],
+        );
+        productData = variantRes.rows[0];
+      } else {
+        // --- CASE 2: Simple Product (No Variation) ---
+        const productRes = await client.query(
+          `SELECT 
+            p.id::text as sku, 
+            t.tax_percentage as tax_rate,
+            CASE 
+              WHEN p.discounted_price > 0 THEN p.discounted_price 
+              ELSE p.base_price
+            END as price,
+            p.bv_point, 
+            null as stock, 
+            p.name as product_name, 
+            p.f_image as product_image, 
+            '[]'::jsonb as attributes,
+            jsonb_build_object(
+              'id', t.id,
+              'name', t.tax_name,
+              'percentage', t.tax_percentage
+            ) as tax_info
+          FROM products p
+          LEFT JOIN tax_settings t ON t.id = p.tax_id 
+          WHERE p.id = $1 AND p.status = 'active'`,
+          [product_id],
+        );
+        productData = productRes.rows[0];
+      }
 
-      if (!productData)
-        throw new Error(`Product/Variant ${product_id} not active.`);
+      if (!productData) {
+        throw new Error(
+          `Product/Variant reference matching ID ${product_id} is not active.`,
+        );
+      }
 
-      // --- INVENTORY CHECK WITH FALLBACK (ID: distributor_id OR 0) ---
+      taxRate = parseFloat(productData.tax_rate || 0);
+      taxInfoObj = productData.tax_info;
+
+      // --- INVENTORY CHECK WITH FALLBACK ---
       const invRes = await client.query(
         `SELECT distributor_id, quantity FROM distributor_inventory 
          WHERE product_id = $1 AND (variant_id = $2 OR (variant_id IS NULL AND $2 IS NULL))
          AND (distributor_id = $3 OR distributor_id = 0)
-         ORDER BY (distributor_id = $3) DESC`, // Taaki specific distributor pehle aaye
+         ORDER BY (distributor_id = $3) DESC`,
         [product_id, variation_id || null, targetDistributorId],
       );
 
-      // Check Specific Distributor first, then Main Warehouse
       let specificDistStock = invRes.rows.find(
         (r) => r.distributor_id == targetDistributorId,
       );
@@ -407,25 +724,33 @@ exports.placeOrder = async (req, res) => {
       }
 
       const price = parseFloat(productData.price);
-      const taxPercent = parseFloat(productData.tax_percentage || 0);
-      const itemTax = ((price * taxPercent) / 100) * qty;
+      const itemTax = ((price * taxRate) / 100) * qty;
       const itemTotal = price * qty;
-      const itemBV = (productData.bv_point || 0) * qty;
+
+      const unitBV = parseFloat(productData.bv_point || 0);
+      const itemBV = unitBV * qty;
 
       validatedItems.push({
         product_id,
         variant_id: variation_id || null,
+        variant_details: {
+          price: productData.price,
+          bv_point: productData.bv_point,
+          tax_data: taxInfoObj, // Frontend validation matching query output sync
+          attributes: productData.attributes || [],
+        },
         qty,
-        unit_price: productData.price,
+        unit_price: price,
+        unit_bv_points: unitBV,
         total_item_price: itemTotal,
         total_item_bv: itemBV,
-        stock_source: finalStockSource, // Track kahan se stock katna hai
+        stock_source: finalStockSource,
         product_name: productData.product_name,
-        product_image: productData.f_image,
+        product_image: productData.product_image,
       });
 
       subTotal += itemTotal;
-      totalTax += itemTax; // Add to global order tax
+      totalTax += itemTax;
       totalBV += itemBV;
     }
 
@@ -458,44 +783,31 @@ exports.placeOrder = async (req, res) => {
 
     // 5. Insert Items & UPDATE INVENTORY (Deduction)
     for (const item of validatedItems) {
-      // Order Item Insert
-      // await client.query(
-      //   `INSERT INTO order_items (order_id, product_id, variant_id, product_name, qty, unit_price, total_item_price, stock_source)
-      //    VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
-      //   [
-      //     dbOrderId,
-      //     item.product_id,
-      //     item.variant_id,
-      //     item.product_name,
-      //     item.qty,
-      //     item.unit_price,
-      //     item.total_item_price,
-      //     item.stock_source,
-      //   ],
-      // );
+      // Fixed structural alignment syntax error & index array parameters matching columns count exactly (12 parameters)
       await client.query(
         `INSERT INTO order_items (
-        order_id, product_id, variant_id, product_name, 
-        qty, unit_price, unit_bv_points, total_item_price, 
-        total_item_bv, stock_source, product_image
-     )
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`,
+          order_id, product_id, variant_id, product_name, 
+          variant_details, qty, unit_price, unit_bv_points, 
+          total_item_price, total_item_bv, stock_source, product_image
+         )
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)`,
         [
           dbOrderId,
           item.product_id,
           item.variant_id,
           item.product_name,
+          item.variant_details,
           item.qty,
           item.unit_price,
-          item.unit_bv_points || 0, // unit_bv_points handle kiya
+          item.unit_bv_points,
           item.total_item_price,
-          item.total_item_bv || 0, // total_item_bv handle kiya (Error Fix)
+          item.total_item_bv,
           item.stock_source,
           item.product_image,
         ],
       );
 
-      // Inventory Deduct (Use finalStockSource identified earlier)
+      // Inventory Deduct
       const deductRes = await client.query(
         `UPDATE distributor_inventory 
          SET quantity = quantity - $1, updated_at = CURRENT_TIMESTAMP
@@ -504,11 +816,12 @@ exports.placeOrder = async (req, res) => {
         [item.qty, item.product_id, item.variant_id, item.stock_source],
       );
 
-      if (deductRes.rowCount === 0)
+      if (deductRes.rowCount === 0) {
         throw new Error(`Inventory update failed for ${item.product_name}`);
+      }
     }
 
-    // 6. Optional: Clear Cart after success
+    // 6. Clear Cart after success
     await client.query(
       `DELETE FROM e_cart_items WHERE cart_id = (SELECT id FROM e_carts WHERE user_id = $1)`,
       [userId],
@@ -789,6 +1102,14 @@ exports.getOrderDetail = async (req, res) => {
             'variant_details', oi.variant_details, 
             'qty', oi.qty, 
             'price', oi.unit_price, 
+
+
+            -- If oi.unit_price is EXCLUSIVE of tax (Base Price):
+            'base_unit_price', ROUND(oi.unit_price::numeric, 2),
+            'tax_amount_per_unit', ROUND((oi.unit_price * COALESCE((oi.variant_details->'tax_data'->>'percentage')::numeric, 0) / 100)::numeric, 2),
+            'total_tax_amount', ROUND((oi.unit_price * oi.qty * COALESCE((oi.variant_details->'tax_data'->>'percentage')::numeric, 0) / 100)::numeric, 2),
+            'unit_price_inclusive', ROUND((oi.unit_price * (1 + COALESCE((oi.variant_details->'tax_data'->>'percentage')::numeric, 0) / 100))::numeric, 2),
+
             -- Extracting tax percentage from JSON and calculating
             'tax_amount', ROUND(
                 (oi.unit_price * COALESCE((oi.variant_details->'tax_data'->>'percentage')::numeric, 0) / 100)::numeric, 

@@ -1,6 +1,7 @@
 const express = require("express");
 const authMiddleware = require("../middleware/authMiddleware");
 const { generateInvoice } = require("../controllers/invoiceController");
+const ecomAuth = require("../middleware/ecomAuth");
 
 const router = express.Router();
 
@@ -8,5 +9,6 @@ const router = express.Router();
 // POST /api/invoice/generate?force=true|false
 // body: { invoiceNo?: string, invoiceDate?: string }
 router.post("/generate", authMiddleware, generateInvoice);
+router.post("/invoice-generate", ecomAuth, generateInvoice);
 
 module.exports = router;
