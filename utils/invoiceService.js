@@ -229,12 +229,12 @@ async function getOrCreateInvoicePdf({ order, force = false }) {
     drawText(String(index + 1), 45, tableY - 14, 9);
     drawText(item.product_name || "Product Item", 70, tableY - 14, 8);
     drawText(String(item.variant_sku || "5407"), 215, tableY - 14, 8);
-    drawText("₹" + unit_mrp.toFixed(2), 252, tableY - 14, 9);
+    drawText("INR " + unit_mrp.toFixed(2), 252, tableY - 14, 9);
     drawText(String(qty), 298, tableY - 14, 9);
     drawText(itemTotal.toFixed(2), 328, tableY - 14, 9);
-    drawText("₹" + taxableVal.toFixed(2), 392, tableY - 14, 9);
-    drawText("₹" + taxAmount.toFixed(2), 468, tableY - 14, 9);
-    drawText("₹" + itemTotal.toFixed(2), 522, tableY - 14, 9);
+    drawText("INR " + taxableVal.toFixed(2), 392, tableY - 14, 9);
+    drawText("INR " + taxAmount.toFixed(2), 468, tableY - 14, 9);
+    drawText("INR " + itemTotal.toFixed(2), 522, tableY - 14, 9);
 
     tableY -= 24;
   });
@@ -254,9 +254,9 @@ async function getOrCreateInvoicePdf({ order, force = false }) {
   const footerTotalAmount = order.total_amount || order.total || "0.00";
 
   drawText("Total", 45, tableY - 14, 10, true);
-  drawText("₹" + String(footerSubTotal), 392, tableY - 14, 9, true);
-  drawText("₹" + String(footerTaxAmount), 468, tableY - 14, 9, true);
-  drawText("₹" + String(footerTotalAmount), 522, tableY - 14, 9, true);
+  drawText("INR " + String(footerSubTotal), 392, tableY - 14, 9, true);
+  drawText("INR " + String(footerTaxAmount), 468, tableY - 14, 9, true);
+  drawText("INR " + String(footerTotalAmount), 522, tableY - 14, 9, true);
 
   tableY -= 22;
   drawLine(40, tableY, 555, tableY, 1);
