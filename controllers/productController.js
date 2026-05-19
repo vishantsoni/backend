@@ -455,7 +455,7 @@ exports.createProduct = async (req, res) => {
     const b_discounted_price = parseFloat(discounted_price) || 0;
     const result = await db.query(
       `INSERT INTO products (cat_id, name, description, short_desc, f_image, g_image, status, tax_id, base_price, subcategories, attributes, discounted_price, slug) 
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12) RETURNING *`,
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13) RETURNING *`,
       [
         cat_id || null,
         name.trim(),
