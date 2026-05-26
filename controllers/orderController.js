@@ -1084,50 +1084,52 @@ exports.getOrderDetail = async (req, res) => {
 
     const query = `
        SELECT 
-    o.id, 
-    o.*, 
-    CASE 
-        WHEN o.user_id IS NOT NULL THEN 'User'
-        WHEN o.distributor_id IS NOT NULL THEN 'Distributor'
-        ELSE 'Unknown'
-    END as user_type,
-    COALESCE(u.name, d.full_name, d.username) as user_name, 
-    COALESCE(u.phone, d.phone) as user_phone,
-    json_agg(
-        json_build_object(
-            'id', oi.id,
-            'product_name', oi.product_name, 
-            'product_image', oi.product_image, 
-            'variant_sku', oi.variant_sku, 
-            'variant_details', oi.variant_details, 
-            'qty', oi.qty, 
-            'price', oi.unit_price, 
+          o.id, 
+          o.*, 
+          CASE 
+              WHEN o.user_id IS NOT NULL THEN 'User'
+              WHEN o.distributor_id IS NOT NULL THEN 'Distributor'
+              ELSE 'Unknown'
+          END as user_type,
+          COALESCE(u.name, d.full_name, d.username) as user_name, 
+          COALESCE(u.phone, d.phone) as user_phone,
+          json_agg(
+              json_build_object(
+                  'id', oi.id,
+                  'product_name', oi.product_name, 
+                  'product_image', oi.product_image, 
+                  'variant_sku', oi.variant_sku, 
+                  'variant_details', oi.variant_details, 
+                  'qty', oi.qty, 
+                  'price', oi.unit_price, 
 
 
-            -- If oi.unit_price is EXCLUSIVE of tax (Base Price):
-            'base_unit_price', ROUND(oi.unit_price::numeric, 2),
-            'tax_amount_per_unit', ROUND((oi.unit_price * COALESCE((oi.variant_details->'tax_data'->>'percentage')::numeric, 0) / 100)::numeric, 2),
-            'total_tax_amount', ROUND((oi.unit_price * oi.qty * COALESCE((oi.variant_details->'tax_data'->>'percentage')::numeric, 0) / 100)::numeric, 2),
-            'unit_price_inclusive', ROUND((oi.unit_price * (1 + COALESCE((oi.variant_details->'tax_data'->>'percentage')::numeric, 0) / 100))::numeric, 2),
+                  -- If oi.unit_price is EXCLUSIVE of tax (Base Price):
+                  'base_unit_price', ROUND(oi.unit_price::numeric, 2),
+                  'tax_amount_per_unit', ROUND((oi.unit_price * COALESCE((oi.variant_details->'tax_data'->>'percentage')::numeric, 0) / 100)::numeric, 2),
+                  'total_tax_amount', ROUND((oi.unit_price * oi.qty * COALESCE((oi.variant_details->'tax_data'->>'percentage')::numeric, 0) / 100)::numeric, 2),
+                  'unit_price_inclusive', ROUND((oi.unit_price * (1 + COALESCE((oi.variant_details->'tax_data'->>'percentage')::numeric, 0) / 100))::numeric, 2),
 
-            -- Extracting tax percentage from JSON and calculating
-            'tax_amount', ROUND(
-                (oi.unit_price * COALESCE((oi.variant_details->'tax_data'->>'percentage')::numeric, 0) / 100)::numeric, 
-                2
-            ),
-            'unit_price', ROUND(
-                (oi.unit_price * (1 + COALESCE((oi.variant_details->'tax_data'->>'percentage')::numeric, 0) / 100))::numeric, 
-                2
-            ),
-            'total_item_price', oi.total_item_price
-        )
-    ) FILTER (WHERE oi.id IS NOT NULL) as items 
-FROM orders o 
-LEFT JOIN ecom_user u ON o.user_id = u.id 
-LEFT JOIN users d ON o.distributor_id = d.id 
-LEFT JOIN order_items oi ON o.id = oi.order_id 
-WHERE o.order_id = $1
-GROUP BY o.id, u.id, d.id;
+                  -- Extracting tax percentage from JSON and calculating
+                  'tax_amount', ROUND(
+                      (oi.unit_price * COALESCE((oi.variant_details->'tax_data'->>'percentage')::numeric, 0) / 100)::numeric, 
+                      2
+                  ),
+                  'unit_price', ROUND(
+                      (oi.unit_price * (1 + COALESCE((oi.variant_details->'tax_data'->>'percentage')::numeric, 0) / 100))::numeric, 
+                      2
+                  ),
+                  'total_item_price', oi.total_item_price
+              )
+          ) FILTER (WHERE oi.id IS NOT NULL) as items ,
+           json_agg(to_jsonb(ret.*)) as return_data
+      FROM orders o 
+      LEFT JOIN ecom_user u ON o.user_id = u.id 
+      LEFT JOIN users d ON o.distributor_id = d.id 
+      LEFT JOIN order_items oi ON o.id = oi.order_id 
+      LEFT JOIN order_returns ret ON ret.order_id = o.id
+      WHERE o.order_id = $1
+      GROUP BY o.id, u.id, d.id, ret.id;
     `;
 
     const order = await db.query(query, [id]);

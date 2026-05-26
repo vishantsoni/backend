@@ -11,7 +11,10 @@ const {
   register,
   login,
   authMe,
+  googleCheck,
+  google,
 } = require("../controllers/ecomAuthController");
+
 const {
   getProfile,
   updateProfile,
@@ -59,6 +62,8 @@ const authMiddleware = require("../middleware/authMiddleware");
 // Auth Routes (public)
 router.post("/auth/register", register);
 router.post("/auth/login", login);
+router.post("/auth/google", google);
+router.post("/auth/google-check", googleCheck);
 
 // =====================
 // ECOM USERS (Super Admin / Distributor)

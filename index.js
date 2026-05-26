@@ -52,6 +52,7 @@ app.use("/api/milestones", require("./routes/milestoneRoutes"));
 app.use("/api/id-cards", require("./routes/idCardRoutes"));
 app.use("/api/letter", require("./routes/welcomeRoute"));
 app.use("/api/blog", require("./routes/blogRoute"));
+app.use("/api/chatbot", require("./routes/chatbotRoutes"));
 
 app.use("/api/support", require("./routes/supportRoutes"));
 app.use("/api/business", require("./routes/businessRoutes"));

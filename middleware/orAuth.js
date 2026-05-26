@@ -39,7 +39,7 @@ const orAuth = async (req, res, next) => {
           .json({ status: false, error: "Account disabled" });
       }
 
-      req.user = { ...userObj, type: "ECOM_USER" }; // Attach user info and type to request
+      req.user = { ...userObj, type: "ECOM_USER", role: "ECOM_USER" }; // Attach user info and type to request
     } else {
       if (decoded.kyc_status !== true) {
         return res
