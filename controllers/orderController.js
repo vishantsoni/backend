@@ -671,8 +671,7 @@ exports.placeOrder = async (req, res) => {
             CASE 
               WHEN p.discounted_price > 0 THEN p.discounted_price 
               ELSE p.base_price
-            END as price,
-            p.bv_point, 
+            END as price,            
             null as stock, 
             p.name as product_name, 
             p.f_image as product_image, 
@@ -727,7 +726,7 @@ exports.placeOrder = async (req, res) => {
       const itemTax = ((price * taxRate) / 100) * qty;
       const itemTotal = price * qty;
 
-      const unitBV = parseFloat(productData.bv_point || 0);
+      const unitBV = 1;
       const itemBV = unitBV * qty;
 
       validatedItems.push({

@@ -35,7 +35,7 @@ async function chatbotMessage(req, res) {
       // Only works if your x-auth-token JWT for ecom users is compatible.
       context = { role: "ECOM_USER", ecomUserId: String(userId) };
     } else {
-      return res.status(403).json({ message: "Forbidden role" });
+      return res.status(403).json({ message: "Forbidden role", role });
     }
 
     const result = await runChatbotAgent({ context, userMessage });

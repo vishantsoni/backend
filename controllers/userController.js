@@ -252,7 +252,7 @@ exports.getProfile = async (req, res) => {
 
     // 2. Fix: Pass parameters inside an array [referral_code]
     const user = await db.query(
-      'SELECT id, full_name AS "name", referral_code FROM users WHERE referral_code = $1',
+      'SELECT id, full_name AS "name", referral_code, binary_path FROM users WHERE referral_code = $1',
       [referral_code],
     );
 
@@ -260,7 +260,26 @@ exports.getProfile = async (req, res) => {
       return res.status(404).json({ status: false, error: "User not found" });
     }
 
-    res.json({ status: true, user: user.rows[0] });
+    const children = await db.query(
+      `SELECT position FROM users 
+         WHERE subpath(binary_path, 0, nlevel(binary_path)-1) = $1
+         FOR UPDATE`,
+      [user.rows[0].binary_path],
+    );
+
+    const taken = children.rows.map((r) => r.position);
+
+    // 🔥 AUTO LEFT → RIGHT → REJECT
+    let = position = 0;
+    if (!taken.includes(1)) {
+      position = 1;
+    } else if (!taken.includes(2)) {
+      position = 2;
+    } else {
+      position = "Both legs are already filled";
+    }
+
+    res.json({ status: true, user: user.rows[0], position });
   } catch (err) {
     // 3. Security: Don't send raw error messages to the client in production
     console.error(err);

@@ -338,10 +338,16 @@ exports.login = async (req, res) => {
 
   try {
     const userResult = await db.query(
-      `SELECT u.*, COALESCE(r.name, 'user') as role_name, COALESCE(r.permissions, '[]'::JSONB) as role_permissions 
-       FROM users u 
-       LEFT JOIN roles r ON u.role_id = r.id 
-       WHERE u.username = $1 OR u.phone = $1 OR u.email = $1 LIMIT 1`,
+      `SELECT u.*, 
+        c.name AS city_name, 
+        s.name AS state_name,
+        COALESCE(r.name, 'user') as role_name, 
+        COALESCE(r.permissions, '[]'::JSONB) as role_permissions 
+        FROM users u 
+        LEFT JOIN roles r ON u.role_id = r.id 
+        LEFT JOIN cities c ON u.city::integer = c.id 
+        LEFT JOIN states s ON u.state::integer = s.id
+        WHERE u.username = $1 OR u.phone = $1 OR u.email = $1 LIMIT 1`,
       [identityValue],
     );
 
