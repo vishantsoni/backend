@@ -1,27 +1,19 @@
-# TODO
+# TODO - Apply coupon flow to placeOrder
 
-## Step 1
+## Plan
 
-- Fix `getAllOrders` filter logic in `controllers/orderController.js`:
-  - Ensure correct SQL precedence for `filter=my`.
-  - Ensure `filter=distributor` matches ONLY `order_for LIKE 'distributor_%'`.
+- [x] Update `controllers/orderController.js` to validate `coupon_code` during `placeOrder`.
 
-## Step 2
+- [ ] Use existing coupon rules from `controllers/couponController.js` (status/date/min order/products/users/anti-abuse/usage limits) by duplicating validation logic inside `placeOrder` (to avoid HTTP call during checkout).
+- [ ] Apply `discount_amount` to the order total using:
+  - `coupon_base_total = subTotal + taxAmount + shippingCharges`
+  - `finalTotalAmount = max(0, coupon_base_total - discount_amount)`
+- [ ] Insert order with reduced `total_amount`.
+- [ ] Ensure validation happens before inserting order items and deducting inventory.
+- [ ] Optional: store coupon fields on `orders` if schema supports them.
 
-- Fix `placeOrder` target distributor selection in `controllers/orderController.js` based on `order_for`:
-  - `admin-distributor` → distributor inventory deduction should target the distributor id referenced by `distributor_id` (or mapped from `order_for` if present).
-  - `admin` → treat as main warehouse (`targetDistributorId=0`) unless explicit distributor_id is provided.
-  - `distributor_%` → inventory deduction should target distributor id from the suffix.
+## Testing
 
-## Step 3
-
-- Fix return refund routing in `controllers/orderReturnController.js`:
-  - If `order.payment_method === 'COD'`, do NOT attempt Razorpay refund.
-  - If `order.payment_method` indicates Razorpay and `payment_status === 'paid'`, only then attempt Razorpay refund.
-
-## Step 4
-
-- Quick verification:
-  - Run server / lint.
-  - Validate `GET /orders?filter=my` and `GET /orders?filter=distributor`.
-  - Create return and run refund for both COD and Razorpay.
+- [ ] Place order without coupon (should succeed unchanged).
+- [ ] Place order with valid coupon (should succeed and reduce total).
+- [ ] Place order with invalid/expired coupon (should fail and not deduct inventory).

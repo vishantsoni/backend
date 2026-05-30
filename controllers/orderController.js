@@ -756,9 +756,124 @@ exports.placeOrder = async (req, res) => {
     // 3. Tax & Shipping (Simple Logic)
     const shippingCharges = await getShippingCharge(client);
     const taxAmount = Math.round(totalTax * 100) / 100;
-    const totalAmount = subTotal + taxAmount + shippingCharges;
+
+    // Coupon base total uses the same `total_amount` concept as couponController.validateCoupon
+    const couponBaseTotalAmount = subTotal + taxAmount + shippingCharges;
+
+    // Apply coupon discount (if provided) - atomic inside the same transaction
+    let discountAmount = 0;
+    let finalTotalAmount = couponBaseTotalAmount;
+
+    if (coupon_code) {
+      const couponCodeNormalized = String(coupon_code).trim().toUpperCase();
+      const couponValidationPayloadTotal = couponBaseTotalAmount;
+
+      // Build product list for coupon validation (coupon rules are based on products array)
+      const couponProducts = items.map((it) => it.product_id).filter(Boolean);
+
+      // Inline the core of couponController.validateCoupon but adapt to server checkout context.
+      const couponResult = await client.query(
+        `
+          SELECT * FROM coupons
+          WHERE code = $1 AND status = 'active' AND used_count < usage_limit
+        `,
+        [couponCodeNormalized],
+      );
+
+      if (couponResult.rows.length === 0) {
+        throw new Error("Invalid or inactive coupon");
+      }
+
+      const coupon = couponResult.rows[0];
+
+      const now = new Date();
+      if (coupon.valid_from && new Date(coupon.valid_from) > now) {
+        throw new Error("Coupon not yet valid");
+      }
+      if (coupon.expires_at && new Date(coupon.expires_at) < now) {
+        throw new Error("Coupon expired");
+      }
+
+      if (
+        parseFloat(couponValidationPayloadTotal) <
+        parseFloat(coupon.min_order_amount)
+      ) {
+        throw new Error(`Minimum order ${coupon.min_order_amount} required`);
+      }
+
+      if (coupon.applicable_products && coupon.applicable_products.length > 0) {
+        const productIds = couponProducts.map((p) => parseInt(p));
+        const invalid = coupon.applicable_products.some(
+          (id) => !productIds.includes(id),
+        );
+        if (invalid) {
+          throw new Error("Coupon not applicable to these products");
+        }
+      }
+
+      // User restriction / anti-abuse:
+      // couponController uses (user_id=... OR username OR phone OR ip_address).
+      // Here we only have userId from auth; username/phone/ip are not available in this flow.
+      // We still enforce applicable_users if present.
+      if (coupon.applicable_users && coupon.applicable_users.length > 0) {
+        if (!coupon.applicable_users.includes(parseInt(userId))) {
+          throw new Error("Coupon not applicable to this user");
+        }
+      }
+
+      const usageCheck = await client.query(
+        `
+          SELECT 1 FROM coupon_usages
+          WHERE coupon_id = $1
+          AND (user_id = $2 OR username = $3 OR phone = $4 OR ip_address = $5)
+        `,
+        [coupon.id, parseInt(userId), null, null, null],
+      );
+
+      if (usageCheck.rows.length > 0) {
+        throw new Error("Coupon already used by this user/phone/IP");
+      }
+
+      // Calculate discount
+      if (coupon.discount_type === "percentage") {
+        discountAmount =
+          (parseFloat(coupon.discount_amount) / 100) *
+          parseFloat(couponValidationPayloadTotal);
+      } else {
+        discountAmount = parseFloat(coupon.discount_amount);
+      }
+
+      if (coupon.max_discount_amount) {
+        discountAmount = Math.min(
+          discountAmount,
+          parseFloat(coupon.max_discount_amount),
+        );
+      }
+
+      discountAmount = parseFloat(discountAmount.toFixed(2));
+      finalTotalAmount = couponBaseTotalAmount - discountAmount;
+      if (finalTotalAmount < 0) finalTotalAmount = 0;
+
+      // Apply coupon usage: increment used_count + record usage
+      await client.query(
+        `UPDATE coupons SET used_count = used_count + 1 WHERE id = $1`,
+        [coupon.id],
+      );
+
+      await client.query(
+        `
+          INSERT INTO coupon_usages
+            (coupon_id, user_id, username, phone, ip_address, user_agent)
+          VALUES ($1, $2, $3, $4, $5, $6)
+        `,
+        [coupon.id, parseInt(userId), null, null, null, null],
+      );
+    }
+
+    const totalAmount = finalTotalAmount;
 
     // 4. Create Order
+
     const orderRef = generateOrderId();
     const orderInsert = await client.query(
       `INSERT INTO orders (order_id, user_id, distributor_id, sub_total, 

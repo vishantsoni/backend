@@ -383,27 +383,27 @@ exports.validateCoupon = async (req, res) => {
     );
 
     // Apply: increment used_count + record usage
-    await client.query(
-      `
-      UPDATE coupons SET used_count = used_count + 1 WHERE id = $1
-    `,
-      [coupon.id],
-    );
+    // await client.query(
+    //   `
+    //   UPDATE coupons SET used_count = used_count + 1 WHERE id = $1
+    // `,
+    //   [coupon.id],
+    // );
 
-    await client.query(
-      `
-      INSERT INTO coupon_usages (coupon_id, user_id, username, phone, ip_address, user_agent)
-      VALUES ($1, $2, $3, $4, $5, $6)
-    `,
-      [
-        coupon.id,
-        user_id ? parseInt(user_id) : null,
-        req.body.username,
-        phone,
-        ip_address,
-        user_agent,
-      ],
-    );
+    // await client.query(
+    //   `
+    //   INSERT INTO coupon_usages (coupon_id, user_id, username, phone, ip_address, user_agent)
+    //   VALUES ($1, $2, $3, $4, $5, $6)
+    // `,
+    //   [
+    //     coupon.id,
+    //     user_id ? parseInt(user_id) : null,
+    //     req.body.username,
+    //     phone,
+    //     ip_address,
+    //     user_agent,
+    //   ],
+    // );
 
     await client.query("COMMIT");
 
