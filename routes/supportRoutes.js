@@ -6,14 +6,27 @@ const isAdmin = require("../middleware/isAdmin");
 const isSuperAdmin = require("../middleware/isSuperAdmin");
 const ecomAuth = require("../middleware/ecomAuth");
 const orAuth = require("../middleware/orAuth");
+const {
+  uploadTicketAttachment,
+} = require("../middleware/ticketAttachmentUpload");
 
 // Public: Raise ticket (no auth needed)
-router.post("/raise-ticket", ticketController.raiseTicket);
+// Expects multipart/form-data field name: attachment (optional)
+router.post(
+  "/raise-ticket",
+  uploadTicketAttachment,
+  ticketController.raiseTicket,
+);
 
 // Auth required user routes
 router.get("/my-tickets", ecomAuth, ticketController.getUserTickets);
 router.get("/:caseId", orAuth, ticketController.getTicketDetails);
-router.post("/:caseId/reply", orAuth, ticketController.replyToTicket);
+router.post(
+  "/:caseId/reply",
+  orAuth,
+  uploadTicketAttachment,
+  ticketController.replyToTicket,
+);
 
 // distributor routes
 router.get("/dis/my-tickets", auth, ticketController.getDistributorTickets);

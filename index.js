@@ -14,13 +14,17 @@ app.use(express.json({ limit: "50mb" }));
 app.use(express.urlencoded({ extended: true, limit: "50mb" }));
 app.use("/uploads", express.static("uploads"));
 
-// Global multer config
+// Global multer config (keep existing behavior for other endpoints)
+// IMPORTANT: avoid applying to every /api request, it can break multipart parsing
+// for specific routes (e.g., ticket raise/reply).
 const multer = require("multer");
 const upload = multer({
   storage: multer.memoryStorage(),
   limits: { fileSize: 10 * 1024 * 1024 },
 });
-app.use("/api", upload.any());
+
+// Only enable global multipart parsing for endpoints that require it.
+// (Keep /api/upload as-is; do NOT parse all /api here.)
 
 // Basic Route
 app.get("/", (req, res) => {

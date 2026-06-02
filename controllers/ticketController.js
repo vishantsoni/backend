@@ -1,9 +1,27 @@
 // controllers/ticketController.js
 const pool = require("../config/db");
+const path = require("path");
+const fs = require("fs/promises");
+
+// Note: do not use slug / pathModule vars; multer handles ticket attachments.
 
 // Existing raiseTicket - already matches new schema
 exports.raiseTicket = async (req, res) => {
-  const { name, email, phone, subject, message, user_id, user_type } = req.body;
+  const {
+    name,
+    email,
+    phone,
+    subject,
+    message,
+    user_id,
+    user_type,
+    attachment,
+  } = req.body;
+
+  // Frontend sends multipart/form-data with field name: "attachment" (can contain up to 2 files)
+  const uploadedFiles = (
+    Array.isArray(req.files) ? req.files : req.file ? [req.file] : []
+  ).filter((f) => f && f.fieldname === "attachment");
 
   // Generate unique Case ID: FS + Year + Random (e.g., FS-2026-123456)
   const currentYear = new Date().getFullYear();
@@ -12,6 +30,7 @@ exports.raiseTicket = async (req, res) => {
 
   try {
     // Determine which foreign key column to populate
+
     const distributorId = user_type === "DISTRIBUTOR" ? user_id : null;
     const ecomUserId = user_type === "ECOM_USER" ? user_id : null;
 
@@ -28,7 +47,7 @@ exports.raiseTicket = async (req, res) => {
         status
       )
       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'OPEN')
-      RETURNING case_id;
+      RETURNING *;
     `;
 
     const values = [
@@ -44,24 +63,99 @@ exports.raiseTicket = async (req, res) => {
 
     const result = await pool.query(query, values);
 
-    /**
-     * Auto-Responder Logic
-     * In a production environment, you'd trigger your
-     * Mailer service here to support@feelsafeco.in
-     */
+    // store attachment in first reply if exists
+    // Frontend sends multipart/form-data with field name: attachment
+    let attachmentValue = attachment || null;
 
-    // Ensure raiser has a read marker row (for unread badge logic)
-    // await pool.query(
-    //   `
-    //     INSERT INTO ticket_reads (ticket_id, viewer_user_id, viewer_user_type, last_read_at)
-    //     SELECT t.id, $1, $2, CURRENT_TIMESTAMP
-    //     FROM tickets t
-    //     WHERE t.case_id = $3
-    //     ON CONFLICT (ticket_id, viewer_user_id, viewer_user_type)
-    //     DO UPDATE SET last_read_at = EXCLUDED.last_read_at
-    //   `,
-    //   [user_id, user_type, caseId],
-    // );
+    // Save attachments to uploads/tickets and store URLs in DB.
+    // Supports:
+    // - diskStorage: uploadedFile.path (but we still copy into our target folder for consistency)
+    // - memoryStorage: uploadedFile.buffer
+    if (uploadedFiles.length > 0) {
+      const ticketUploadsDir = path.join("uploads", "tickets");
+      await fs.mkdir(ticketUploadsDir, { recursive: true });
+
+      const insertedReplies = [];
+
+      for (const uploadedFile of uploadedFiles) {
+        let currentAttachmentValue = null;
+
+        const ext = path.extname(uploadedFile.originalname || "").toLowerCase();
+        const baseName = path.basename(
+          uploadedFile.originalname || "attachment",
+          ext,
+        );
+        const safeBase = baseName.replace(/[^a-z0-9_-]/gi, "_");
+        const uniqueSuffix = `${Date.now()}_${Math.floor(Math.random() * 1e6)}`;
+        const fileName = `${safeBase}_${uniqueSuffix}${ext || ""}`;
+        const finalPath = path.join(ticketUploadsDir, fileName);
+
+        if (uploadedFile.buffer) {
+          await fs.writeFile(finalPath, uploadedFile.buffer);
+        } else if (uploadedFile.path) {
+          // Copy the disk-stored file into uploads/tickets
+          const fileBytes = await fs.readFile(uploadedFile.path);
+          await fs.writeFile(finalPath, fileBytes);
+        }
+
+        const relativeUrlPath = `/uploads/tickets/${fileName}`;
+        currentAttachmentValue = `${process.env.APP_URL}${relativeUrlPath}`;
+
+        const replyQuery = `
+          INSERT INTO ticket_replies (
+            ticket_id,
+            replied_by,
+            replied_by_type,
+            message,
+            attachment,
+            is_admin
+          )
+          VALUES ($1, $2, $3, $4, $5, false)
+          RETURNING *
+        `;
+
+        const replyValues = [
+          result.rows[0].id,
+          user_id || null,
+          user_type || "USER",
+          message,
+          currentAttachmentValue,
+        ];
+
+        const replyRes = await pool.query(replyQuery, replyValues);
+        insertedReplies.push(replyRes.rows[0]);
+      }
+
+      attachmentValue = insertedReplies.length
+        ? insertedReplies[0].attachment
+        : null;
+    }
+
+    // If there are no attachments, still create a reply row with message only.
+    if (!uploadedFiles.length) {
+      const firstReplyQuery = `
+        INSERT INTO ticket_replies (
+          ticket_id,
+          replied_by,
+          replied_by_type,
+          message,
+          attachment,
+          is_admin
+        )
+        VALUES ($1, $2, $3, $4, $5, false)
+        RETURNING *
+      `;
+
+      const firstReplyValues = [
+        result.rows[0].id,
+        user_id || null,
+        user_type || "USER",
+        message,
+        null,
+      ];
+
+      await pool.query(firstReplyQuery, firstReplyValues);
+    }
 
     res.status(201).json({
       success: true,
@@ -234,6 +328,15 @@ exports.getTicketDetails = async (req, res) => {
 exports.replyToTicket = async (req, res) => {
   const { caseId } = req.params;
   const { message, attachment } = req.body;
+
+  // Attachments can come either as req.file (single) or req.files (global multer any())
+  // Field name expected from frontend: "attachment"
+  const uploadedFile =
+    req.file ||
+    (Array.isArray(req.files)
+      ? req.files.find((f) => f.fieldname === "attachment") || null
+      : null);
+
   const repliedBy = req.user.id; // from auth
   const repliedByType = req.user.type || "USER"; // USER/STAFF
 
@@ -253,12 +356,40 @@ exports.replyToTicket = async (req, res) => {
       RETURNING *
     `;
 
+    let attachmentValue = attachment || null;
+
+    // Save uploaded attachment file (if any) and store URL in DB.
+    if (uploadedFile) {
+      const ticketUploadsDir = path.join("uploads", "tickets");
+      await fs.mkdir(ticketUploadsDir, { recursive: true });
+
+      const ext = path.extname(uploadedFile.originalname || "").toLowerCase();
+      const baseName = path.basename(
+        uploadedFile.originalname || "attachment",
+        ext,
+      );
+      const safeBase = baseName.replace(/[^a-z0-9_-]/gi, "_");
+      const uniqueSuffix = `${Date.now()}_${Math.floor(Math.random() * 1e6)}`;
+      const fileName = `${safeBase}_${uniqueSuffix}${ext || ""}`;
+      const finalPath = path.join(ticketUploadsDir, fileName);
+
+      if (uploadedFile.buffer) {
+        await fs.writeFile(finalPath, uploadedFile.buffer);
+      } else if (uploadedFile.path) {
+        const fileBytes = await fs.readFile(uploadedFile.path);
+        await fs.writeFile(finalPath, fileBytes);
+      }
+
+      const relativeUrlPath = `/uploads/tickets/${fileName}`;
+      attachmentValue = `${process.env.APP_URL}${relativeUrlPath}`;
+    }
+
     const values = [
       ticketResult.rows[0].id,
       repliedBy,
       repliedByType,
       message,
-      attachment || null,
+      attachmentValue,
       repliedByType === "STAFF",
     ];
 
@@ -376,7 +507,7 @@ exports.getDistributorTickets = async (req, res) => {
     const whereClause = "WHERE distributor_id = $1";
 
     const query = `
-      SELECT id, case_id, subject, status, created_at, updated_at
+      SELECT id, case_id, subject, status, created_at, updated_at, name
       FROM tickets 
       ${whereClause}
       ORDER BY created_at DESC

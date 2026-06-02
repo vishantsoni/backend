@@ -17,6 +17,12 @@ const ensureOrderOwnership = (order, userId) => {
   return String(order.user_id) === String(userId);
 };
 
+const ensureOrder_D_Ownership = (order, distributor_id) => {
+  // order.user_id is integer or null depending on schema version
+  // Your current auth middleware likely sets req.user.id.
+  return String(order.distributor_id) === String(distributor_id);
+};
+
 // Wallet refund amount should be supported by `wallets.total_amount`.
 const refundToWallet = async (
   client,
@@ -136,6 +142,86 @@ exports.requestReturn = async (req, res) => {
       data: insertRes.rows[0],
     });
   } catch (err) {
+    console.log("error in return order - ", err);
+
+    await client.query("ROLLBACK");
+    res.status(400).json({ success: false, message: err.message });
+  } finally {
+    client.release();
+  }
+};
+
+exports.dis_requestReturn = async (req, res) => {
+  const client = await db.connect();
+  try {
+    await client.query("BEGIN");
+
+    const userId = req.user.id;
+    const { id: orderDbId } = req.params;
+    const { reason } = req.body;
+
+    const orderRes = await getOrderById(client, parseInt(orderDbId));
+    if (orderRes.rows.length === 0) {
+      throw new Error("Order not found");
+    }
+    const order = orderRes.rows[0];
+
+    if (!ensureOrder_D_Ownership(order, userId)) {
+      throw new Error("Order not accessible");
+    }
+
+    // Only allow returns on delivered orders
+    if (order.order_status !== "delivered") {
+      throw new Error("Return allowed only for delivered orders");
+    }
+
+    // prevent multiple active returns
+    const existing = await client.query(
+      `SELECT * FROM order_returns
+       WHERE order_id = $1
+       ORDER BY created_at DESC
+       LIMIT 1`,
+      [parseInt(orderDbId)],
+    );
+
+    if (
+      existing.rows[0] &&
+      !["rejected", "cancelled", "refunded"].includes(
+        existing.rows[0].return_status,
+      )
+    ) {
+      // if you want to allow re-requests after rejection only, keep this.
+      throw new Error("Return already requested for this order");
+    }
+
+    const insertRes = await client.query(
+      `INSERT INTO order_returns (order_id, user_id, return_reason)
+       VALUES ($1, $2, $3)
+       RETURNING *`,
+      [parseInt(orderDbId), userId, reason || null],
+    );
+
+    // Update order status so the rest of the system can reflect return workflow
+    await client.query(
+      `UPDATE orders
+       SET order_status = 'return_requested',
+           updated_at = CURRENT_TIMESTAMP
+       WHERE id = $1`,
+      [parseInt(orderDbId)],
+    );
+
+    // NOTE: We intentionally keep the return status transition independent;
+    // adminApproveReturn/warehouseReceiveReturn/refundForReturn will manage the lifecycle in order_returns.
+
+    await client.query("COMMIT");
+    res.status(201).json({
+      success: true,
+      message: "Return request created",
+      data: insertRes.rows[0],
+    });
+  } catch (err) {
+    console.log("error in return order - ", err);
+
     await client.query("ROLLBACK");
     res.status(400).json({ success: false, message: err.message });
   } finally {

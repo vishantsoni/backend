@@ -37,6 +37,12 @@ router.post(
   orderReturnController.requestReturn,
 );
 
+router.post(
+  "/:id/return/request",
+  authMiddleware,
+  orderReturnController.dis_requestReturn,
+);
+
 // Admin approves / rejects return request
 router.put(
   "/returns/:returnId/approve",
