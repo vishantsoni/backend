@@ -6,9 +6,9 @@ async function seedAdminData() {
   try {
     await client.query("BEGIN");
 
-    const username = "9999999999";
+    const username = "8130124630";
     const salt = await bcrypt.genSalt(10);
-    const hashedPassword = await bcrypt.hash("12345678", salt);
+    const hashedPassword = await bcrypt.hash("Vats1992*", salt);
 
     const newUser = await client.query(
       `INSERT INTO users (
@@ -35,8 +35,8 @@ async function seedAdminData() {
         "1970-01-01",
         "Male",
         null,
-        "admin@gmail.com",
-        "9999999999",
+        "eelsafe.pvtltd@gmail.com",
+        "8130124630",
         null,
         null,
         null,
@@ -86,8 +86,8 @@ async function seedAdminData() {
       console.log("ℹ️ Super Admin already exists. No changes made.");
     }
 
-    console.log("📱 Phone: 9999999999");
-    console.log("🔑 Password: 12345678");
+    console.log("📱 Phone: 8130124630");
+    console.log("🔑 Password: Vats1992*");
   } catch (error) {
     await client.query("ROLLBACK");
     console.error("❌ Error seeding admin data:", error);

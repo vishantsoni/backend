@@ -86,6 +86,8 @@ async function generateAndSaveIdCard({
   fullName,
   referralCode,
   phone,
+  joinDate,
+  profileImagePath,
 }) {
   const userDir = path.join(
     process.cwd(),
@@ -98,12 +100,10 @@ async function generateAndSaveIdCard({
   const backCard = path.join(userDir, "back.jpg");
   const qrCodePath = path.join(userDir, "qr.png");
 
-  // --- NEW LOGIC: CHECK IF ALREADY EXISTS ---
+  // If already generated, do NOT regenerate again (user asked for only first-time add issue date)
   try {
-    // We check for front.jpg as the indicator that the card set exists
     await fs.access(frontCard);
 
-    // If access succeeds, file exists. Return the paths/URLs immediately.
     return {
       frontUrl: `${
         process.env.APP_URL || ""
@@ -115,12 +115,10 @@ async function generateAndSaveIdCard({
       frontPath: frontCard,
       backPath: backCard,
       qrPath: qrCodePath,
-      alreadyExisted: true, // Optional flag for debugging
+      alreadyExisted: true,
     };
   } catch (err) {
-    // throw new Error(
-    //   `ID card already exists for user ${userId}. To refresh, delete existing card first.`,
-    // ); // Or handle as needed
+    // not exists => continue generating
   }
 
   await ensureDir(userDir);
@@ -171,6 +169,81 @@ async function generateAndSaveIdCard({
       ctx.fillStyle = "#1A1A1B"; // Reset to dark color
       ctx.font = "bold 32px Arial";
       ctx.fillText(`IR NO: ${String(referralCode)}`, 320, 760); // Placed below the ribbon
+    }
+
+    // Profile image (from KYC 'profile' document)
+    // Profile image (from KYC 'profile' document)
+    if (profileImagePath) {
+      try {
+        const profileImg = await loadImage(profileImagePath);
+
+        // Define circle center and radius based on your template
+        const centerX = 320; // Horizontal center of the template (approx)
+        const centerY = 365; // Vertical center of the white circle area
+        const radius = 150; // Radius of the circular frame
+
+        ctx.save(); // Save current state
+
+        // 1. Create a circular clipping path
+        ctx.beginPath();
+        ctx.arc(centerX, centerY, radius, 0, Math.PI * 2, true);
+        ctx.closePath();
+        ctx.clip();
+
+        // 2. Draw the image (Centered and Scaled)
+        // We calculate dimensions to maintain aspect ratio (Cover effect)
+        const aspect = profileImg.width / profileImg.height;
+        let drawWidth, drawHeight;
+
+        if (aspect > 1) {
+          drawHeight = radius * 2;
+          drawWidth = drawHeight * aspect;
+        } else {
+          drawWidth = radius * 2;
+          drawHeight = drawWidth / aspect;
+        }
+
+        // Draw image centered on the circle
+        ctx.drawImage(
+          profileImg,
+          centerX - drawWidth / 2,
+          centerY - drawHeight / 2,
+          drawWidth,
+          drawHeight,
+        );
+
+        ctx.restore(); // Restore state to remove clipping for subsequent drawing
+      } catch (e) {
+        console.error("Error loading profile image overlay:", e);
+      }
+    }
+
+    // Issue date + Join date + 1 year (first-time generation only)
+    // Format: d/M/YYYY - d/M/YYYY
+    if (joinDate) {
+      const jd = new Date(joinDate);
+      if (!Number.isNaN(jd.getTime())) {
+        const start = jd;
+        const end = new Date(jd);
+        // end = start + 1 year - 1 day
+        end.setFullYear(end.getFullYear() + 1);
+        end.setDate(end.getDate() - 1);
+
+        const fmt = (d) => {
+          const day = d.getDate();
+          const month = d.getMonth() + 1;
+          const year = d.getFullYear();
+          return `${day}/${month}/${year}`;
+        };
+
+        const dateRange = `${fmt(start)} - ${fmt(end)}`;
+
+        // Placement: adjust to fit the template.
+        // Chosen below ribbon area; if it overlaps your template, tweak Y.
+        ctx.fillStyle = "#1A1A1B";
+        ctx.font = "bold 26px Arial";
+        ctx.fillText(dateRange, 370, 805);
+      }
     }
 
     // ACTIVE level text is already embedded in template only if you use the demo.

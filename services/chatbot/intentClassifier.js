@@ -9,7 +9,8 @@ function extractOrderId(text) {
 }
 
 function classifyIntent({ context, userMessage }) {
-  const text = (userMessage || "").toLowerCase();
+  const rawUserMessage = userMessage || "";
+  const text = String(rawUserMessage).toLowerCase();
 
   if (context.role === "ECOM_USER") {
     const orderId = extractOrderId(userMessage);
@@ -18,38 +19,39 @@ function classifyIntent({ context, userMessage }) {
       return {
         toolName: orderId ? "trackOrder" : "getOrderStatus",
         params: { orderId },
+        rawUserMessage,
       };
     }
 
     if (/(address|delivery address|my address)/.test(text)) {
-      return { toolName: "getMyAddresses", params: {} };
+      return { toolName: "getMyAddresses", params: {}, rawUserMessage };
     }
 
     if (/(wishlist|save for later)/.test(text)) {
-      return { toolName: "getMyWishlist", params: {} };
+      return { toolName: "getMyWishlist", params: {}, rawUserMessage };
     }
 
-    return { toolName: "getOrderStatus", params: { orderId } };
+    return { toolName: "getOrderStatus", params: { orderId }, rawUserMessage };
   }
 
   if (context.role === "DISTRIBUTOR") {
     if (/(wallet|balance|pending|company fund)/.test(text)) {
-      return { toolName: "getWalletBalance", params: {} };
+      return { toolName: "getWalletBalance", params: {}, rawUserMessage };
     }
 
     if (/(downline|team count|my team|binary)/.test(text)) {
-      return { toolName: "getDownlineCount", params: {} };
+      return { toolName: "getDownlineCount", params: {}, rawUserMessage };
     }
 
     if (/(commission|earnings|income|ref bonus|latest)/.test(text)) {
-      return { toolName: "getLatestCommissions", params: {} };
+      return { toolName: "getLatestCommissions", params: {}, rawUserMessage };
     }
 
     // default
-    return { toolName: "getWalletBalance", params: {} };
+    return { toolName: "getWalletBalance", params: {}, rawUserMessage };
   }
 
-  return { toolName: null, params: {} };
+  return { toolName: null, params: {}, rawUserMessage };
 }
 
 module.exports = { classifyIntent };

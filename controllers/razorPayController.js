@@ -48,6 +48,20 @@ exports.verifyPayment = async (req, res) => {
   }
 };
 
+exports.VerifyPaymentFunc = async (
+  razorpay_order_id,
+  razorpay_payment_id,
+  razorpay_signature,
+) => {
+  const sign = razorpay_order_id + "|" + razorpay_payment_id;
+  const expectedSign = crypto
+    .createHmac("sha256", process.env.RAZORPAY_KEY_SECRET)
+    .update(sign.toString())
+    .digest("hex");
+
+  return razorpay_signature === expectedSign;
+};
+
 exports.razorpayWebhook = async (req, res) => {
   // 1. The secret you set in Razorpay Dashboard -> Settings -> Webhooks
   const WEBHOOK_SECRET = process.env.RAZORPAY_WEBHOOK_SECRET;

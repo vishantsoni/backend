@@ -1,19 +1,7 @@
-# TODO - Apply coupon flow to placeOrder
+# TODO
 
-## Plan
-
-- [x] Update `controllers/orderController.js` to validate `coupon_code` during `placeOrder`.
-
-- [ ] Use existing coupon rules from `controllers/couponController.js` (status/date/min order/products/users/anti-abuse/usage limits) by duplicating validation logic inside `placeOrder` (to avoid HTTP call during checkout).
-- [ ] Apply `discount_amount` to the order total using:
-  - `coupon_base_total = subTotal + taxAmount + shippingCharges`
-  - `finalTotalAmount = max(0, coupon_base_total - discount_amount)`
-- [ ] Insert order with reduced `total_amount`.
-- [ ] Ensure validation happens before inserting order items and deducting inventory.
-- [ ] Optional: store coupon fields on `orders` if schema supports them.
-
-## Testing
-
-- [ ] Place order without coupon (should succeed unchanged).
-- [ ] Place order with valid coupon (should succeed and reduce total).
-- [ ] Place order with invalid/expired coupon (should fail and not deduct inventory).
+- [ ] Add Issue Date + Join Date + 1 year range text overlay to ID card front (demo)
+  - [ ] Update `routes/idCardRoutes.js` to fetch join date from DB (users.created_at) and pass to `generateAndSaveIdCard`
+  - [ ] Update `utils/idCardService.js` to compute date range and render it on the front card using canvas
+  - [ ] Ensure re-render happens even if front.jpg/back.jpg already exist (remove/adjust early-return)
+  - [ ] Quick runtime test: call `/idcard/generate` and verify front image has date range

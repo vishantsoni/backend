@@ -33,12 +33,22 @@ router.post("/reset-password", userController.resetPassword);
 
 // KYC routes
 router.get("/kyc-status", kycMiddleware, userController.getKycStatus);
+
+const multer = require("multer");
+const kycUpload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 5 * 1024 * 1024 },
+});
+
 router.post(
   "/kyc/upload",
+  // multipart parsing (req.files + req.body)
+  kycUpload.any(),
   require("../middleware/processKycUpload"),
   userController.uploadKycDocuments,
 );
 router.post("/kyc/submit", kycMiddleware, userController.submitKycRequest);
+
 router.post(
   "/admin/kyc/:userId",
   [auth, isAdmin],

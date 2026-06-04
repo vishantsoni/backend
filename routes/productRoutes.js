@@ -102,6 +102,7 @@ router.post(
 // Product CRUD routes - now with multer
 router.post(
   "/products",
+  upload.any(),
   [authMiddleware, isSuperAdmin, processProductFiles],
   createProduct,
 );
@@ -109,6 +110,7 @@ router.get("/product-detail/:slug", getProductByslug);
 router.get("/products/:id", getProductById);
 router.put(
   "/products/:id",
+  upload.any(),
   [authMiddleware, isSuperAdmin, processProductFiles],
   updateProduct,
 );

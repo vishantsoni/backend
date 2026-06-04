@@ -127,7 +127,7 @@ async function generateAndSaveWelcomeLetter({
     ctx.fillStyle = "#D32F2F"; // Matching the pink/red color profile theme
     ctx.font = `bold ${baseFontSize + 2}px Arial`;
     // X: ~16.5% from left margin, Y: ~27.1% from top
-    ctx.fillText(String(fullName).toUpperCase(), W * 0.165, H * 0.27);
+    ctx.fillText(String(fullName).toUpperCase(), W * 0.165, H * 0.281);
   }
 
   // 3. Draw Unique Sakhi ID (Below "Your unique Sakhi ID is:")
@@ -135,7 +135,7 @@ async function generateAndSaveWelcomeLetter({
     ctx.fillStyle = "#D32F2F";
     ctx.font = `bold ${Math.round(baseFontSize * 1.2)}px Arial`; // Slightly bigger accent font
     // X: ~11.5% from left margin, Y: ~34.8% from top
-    ctx.fillText(String(referralCode).toUpperCase(), W * 0.35, H * 0.348);
+    ctx.fillText(String(referralCode).toUpperCase(), W * 0.35, H * 0.352);
   }
 
   const out = canvas.toBuffer("image/jpeg", { quality: 0.95 });

@@ -38,7 +38,7 @@ router.post(
 );
 
 router.post(
-  "/:id/return/request",
+  "/return/:id/request",
   authMiddleware,
   orderReturnController.dis_requestReturn,
 );

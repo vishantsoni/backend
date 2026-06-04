@@ -664,6 +664,7 @@ exports.getGSTReport = async (req, res) => {
 
     return res.json({
       success: true,
+      role: roleClause,
       data: {
         summary: summaryResult.rows[0],
         tax_slabs: taxSlabResult.rows,

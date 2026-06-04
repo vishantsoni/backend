@@ -1,5 +1,6 @@
 const db = require("../config/db");
 const { generateAndSaveIdCard } = require("../utils/idCardService");
+const { VerifyPaymentFunc } = require("./razorPayController");
 const generateOrderId = () => {
   const now = new Date();
 
@@ -285,12 +286,44 @@ exports.d_p_o = async (req, res) => {
       coupon_code,
       payment_method = "wallet",
       razorpay_order_id,
+      razorpay_payment_id,
+      razorpay_signature,
     } = req.body;
 
     if (!items || !Array.isArray(items) || items.length === 0) {
       return res
         .status(400)
         .json({ success: false, message: "Items required" });
+    }
+
+    //verify payment if razorpay details are provided (optional for wallet payments)
+    if (
+      payment_method === "razorpay" &&
+      (!razorpay_order_id || !razorpay_payment_id || !razorpay_signature)
+    ) {
+      return res.status(400).json({
+        success: false,
+        message: "Razorpay payment details required for razorpay method",
+      });
+    }
+
+    let paymentStatus = "unpaid";
+
+    //Verify Razorpay signature if payment method is razorpay
+    if (payment_method === "razorpay") {
+      const VerifyPaymentFuncResult = await VerifyPaymentFunc(
+        razorpay_order_id,
+        razorpay_payment_id,
+        razorpay_signature,
+      );
+
+      if (!VerifyPaymentFuncResult) {
+        return res
+          .status(400)
+          .json({ success: false, message: "Invalid Razorpay signature" });
+      }
+
+      paymentStatus = "paid"; // Mark as paid if Razorpay verification is successful
     }
 
     // 1. Validate items, calculate totals
@@ -434,8 +467,8 @@ exports.d_p_o = async (req, res) => {
     // 7. Create order
     const orderId = generateOrderId();
     const newOrder = await client.query(
-      `INSERT INTO orders (order_id, distributor_id, sub_total, tax_amount, shipping_charges, total_amount, total_bv_points, shipping_address, payment_method, order_for)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 'admin-distributor') RETURNING *`,
+      `INSERT INTO orders (order_id, distributor_id, sub_total, tax_amount, shipping_charges, total_amount, total_bv_points, shipping_address, payment_method, order_for, payment_status)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 'admin-distributor', $10) RETURNING *`,
       [
         orderId,
         userId,
@@ -446,6 +479,7 @@ exports.d_p_o = async (req, res) => {
         totalBV,
         shipping_address,
         payment_method,
+        paymentStatus,
       ],
     );
 

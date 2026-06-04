@@ -500,7 +500,7 @@ const generateUsername = async (client) => {
 const QRCode = require("qrcode");
 
 const generateQrcode = async (referral_code) => {
-  const registrationLink = `https://admin-mlm.vercel.app/signup?ref=${referral_code}`;
+  const registrationLink = `https://panel.feelsafeco.in/signup?ref=${referral_code}`;
 
   // Folder path define karein
 
@@ -764,7 +764,20 @@ exports.createUser = async (req, res) => {
 
 exports.uploadKycDocuments = async (req, res) => {
   try {
-    const userId = req.body.id;
+    // multer multipart parse ke baad ye id req.body me aani chahiye
+    const userId = req.body?.id;
+
+    console.log("Received KYC upload request for user ID:", req.body);
+    console.log("Files received:", req.files);
+
+    if (!userId) {
+      return res
+        .status(400)
+        .json({
+          status: false,
+          error: "User id is required (form-data field name: id)",
+        });
+    }
 
     if (!req.files || req.files.length === 0) {
       return res
