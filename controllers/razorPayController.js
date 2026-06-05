@@ -1,5 +1,6 @@
 const Razorpay = require("razorpay");
 const crypto = require("crypto");
+const db = require("../config/db");
 
 const razorpay = new Razorpay({
   key_id: process.env.RAZORPAY_KEY_ID,
@@ -14,24 +15,21 @@ exports.createOrder = async (req, res) => {
   console.log("\n[createOrder] Incoming body:", req.body);
 
   const dbOrderId = req.body?.order_id;
-  if (!dbOrderId) {
-    return res.status(400).json({
-      status: false,
-      message: "Missing required field: order_id (db order id) in request body",
-    });
-  }
+  // if (!dbOrderId) {
+  //   return res.status(400).json({
+  //     status: false,
+  //     message: "Missing required field: order_id (db order id) in request body",
+  //   });
+  // }
 
   const options = {
     amount: req.body.amount * 100, // Amount in paise (e.g., 500 INR = 50000)
     currency: "INR",
     receipt: req.body.receipt || `receipt_${Date.now()}`,
     notes: {
-      my_database_order_id: dbOrderId, // must match webhook extraction
-      // include other identifiers here if needed (ex: user_id)
+      my_database_order_id: dbOrderId,
     },
   };
-
-  console.log("[createOrder] Razorpay options.notes:", options.notes);
 
   try {
     const order = await razorpay.orders.create(options);

@@ -1,6 +1,7 @@
 const nodemailer = require("nodemailer");
 const db = require("../config/db");
 const crypto = require("crypto");
+const https = require("https");
 
 // Transporter config (use .env: EMAIL_HOST, EMAIL_PORT, EMAIL_USER, EMAIL_PASS)
 // const transporter = nodemailer.createTransport({
@@ -45,6 +46,57 @@ async function shouldUseEmail(userId) {
   return user.otp_email_count < 2;
 }
 
+function sendSmsEdumarc({ phone, otp }) {
+  const apiKey = process.env.EDUMARC_SMS_APIKEY;
+  if (!apiKey) {
+    throw new Error(
+      "Missing env var EDUMARC_SMS_APIKEY (required for Edumarc OTP SMS)",
+    );
+  }
+
+  const payload = {
+    message: `Your FEELSAFECO OTP for verification is: ${otp}. OTP is confidential, refrain from sharing it with anyone. By Edumarc Technologies`,
+    senderId: "EDUMRC",
+    number: [phone],
+    templateId: "1707168926925165526",
+  };
+
+  const data = JSON.stringify(payload);
+
+  return new Promise((resolve, reject) => {
+    const req = https.request(
+      "https://smsapi.edumarcsms.com/api/v1/sendsms",
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          apikey: apiKey,
+          "Content-Length": Buffer.byteLength(data),
+        },
+      },
+      (res) => {
+        let body = "";
+        res.on("data", (chunk) => {
+          body += chunk;
+        });
+        res.on("end", () => {
+          const statusCode = res.statusCode || 0;
+          if (statusCode >= 200 && statusCode < 300) {
+            return resolve({ statusCode, body });
+          }
+          return reject(
+            new Error(`Edumarc SMS failed (${statusCode}): ${body}`),
+          );
+        });
+      },
+    );
+
+    req.on("error", (err) => reject(err));
+    req.write(data);
+    req.end();
+  });
+}
+
 exports.sendOTP = async (userId, purpose = "transaction") => {
   const user = await getUserContact(userId);
   const otp = generateOTP();
@@ -57,11 +109,11 @@ exports.sendOTP = async (userId, purpose = "transaction") => {
   ); // Assume user_otps table; create if missing
 
   const useEmail = await shouldUseEmail(userId);
-  const contact = useEmail ? user.email : user.phone;
-  const subject = `Your ${purpose} OTP`;
   const message = `Your OTP is ${otp}. Valid for 5 minutes.`;
 
   if (useEmail) {
+    const subject = `Your ${purpose} OTP`;
+
     await transporter.sendMail({
       to: user.email,
       subject,
@@ -71,11 +123,11 @@ exports.sendOTP = async (userId, purpose = "transaction") => {
       "UPDATE users SET otp_email_count = otp_email_count + 1 WHERE id = $1",
       [userId],
     );
-    console.log("EMAIL Configure please");
+    console.log("EMAIL OTP sent");
   } else {
-    // TODO: SMS via Twilio
-    console.log(`SMS to ${user.phone}: ${message}`);
-    // twilioClient.messages.create({...})
+    // SMS via Edumarc
+    await sendSmsEdumarc({ phone: user.phone, otp });
+    console.log(`SMS OTP sent to ${user.phone}`);
   }
 
   return { sentTo: useEmail ? "email" : "sms", expiresAt, otp: otp };
