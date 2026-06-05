@@ -1,7 +1,9 @@
 # TODO
 
-- [ ] Add Issue Date + Join Date + 1 year range text overlay to ID card front (demo)
-  - [ ] Update `routes/idCardRoutes.js` to fetch join date from DB (users.created_at) and pass to `generateAndSaveIdCard`
-  - [ ] Update `utils/idCardService.js` to compute date range and render it on the front card using canvas
-  - [ ] Ensure re-render happens even if front.jpg/back.jpg already exist (remove/adjust early-return)
-  - [ ] Quick runtime test: call `/idcard/generate` and verify front image has date range
+## Razorpay webhook notes/order_id troubleshooting
+
+- [ ] Update `controllers/razorPayController.js` `createOrder` to validate `req.body.order_id` and add debug logs for `req.body.order_id` and `options.notes`.
+- [ ] Update `controllers/razorPayController.js` webhook handler to log `paymentData.notes` (type + keys) when `payment.captured` arrives.
+- [ ] Add a safe fallback: if `notes` is empty, log helpful context including `paymentData` keys.
+- [x] Restart backend server and trigger `/create-order` + payment.
+- [ ] Confirm webhook payload now contains `notes.my_database_order_id` and DB update uses correct order_id.

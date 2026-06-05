@@ -11,14 +11,27 @@ const {
 
 // Step 1: Create Order
 exports.createOrder = async (req, res) => {
+  console.log("\n[createOrder] Incoming body:", req.body);
+
+  const dbOrderId = req.body?.order_id;
+  if (!dbOrderId) {
+    return res.status(400).json({
+      status: false,
+      message: "Missing required field: order_id (db order id) in request body",
+    });
+  }
+
   const options = {
     amount: req.body.amount * 100, // Amount in paise (e.g., 500 INR = 50000)
     currency: "INR",
-    receipt: `receipt_${Date.now()}`,
+    receipt: req.body.receipt || `receipt_${Date.now()}`,
     notes: {
-      my_database_order_id: req.body.order_id, // Or myDbOrder._id / myDbOrder.id
+      my_database_order_id: dbOrderId, // must match webhook extraction
+      // include other identifiers here if needed (ex: user_id)
     },
   };
+
+  console.log("[createOrder] Razorpay options.notes:", options.notes);
 
   try {
     const order = await razorpay.orders.create(options);
@@ -212,6 +225,15 @@ exports.razorpayWebhook = async (req, res) => {
 
         const paymentId = paymentData.id;
         const orderId = paymentData.order_id;
+        // notes can be [] or object depending on Razorpay; log it to debug
+        console.log(
+          "[webhook] paymentData.notes:",
+          paymentData.notes,
+          "(type:",
+          paymentData.notes && typeof paymentData.notes,
+          ")",
+        );
+
         const myCustomDbOrderId = paymentData.notes?.my_database_order_id;
         const userId = paymentData.notes?.user_id;
 
