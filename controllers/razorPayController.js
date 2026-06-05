@@ -157,9 +157,13 @@ exports.razorpayWebhook = async (req, res) => {
     // 2. Signature Validation Details
     const shasum = crypto.createHmac("sha256", WEBHOOK_SECRET);
 
-    // ⚠️ IMPORTANT NOTE: Agar signature mismatch hota hai, toh read point #1 below.
-    const bodyString = JSON.stringify(req.body);
-    shasum.update(bodyString);
+    // Razorpay signature raw request body bytes par based hoti hai.
+    // express.raw middleware se req.body ek Buffer hota hai.
+    // JSON.stringify(req.body) mat karo, warna bytes change ho jaate hain.
+    const rawBody = Buffer.isBuffer(req.body)
+      ? req.body
+      : Buffer.from(JSON.stringify(req.body));
+    shasum.update(rawBody);
     const digest = shasum.digest("hex");
 
     console.log(`[DEBUG] Generated Local Digest:       "${digest}"`);
