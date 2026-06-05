@@ -5,6 +5,9 @@ const razorpay = new Razorpay({
   key_id: process.env.RAZORPAY_KEY_ID,
   key_secret: process.env.RAZORPAY_KEY_SECRET,
 });
+const {
+  validateWebhookSignature,
+} = require("razorpay/dist/utils/razorpay-utils");
 
 // Step 1: Create Order
 exports.createOrder = async (req, res) => {
@@ -131,18 +134,27 @@ exports.razorpayWebhook = async (req, res) => {
   console.log("📥 NEW RAZORPAY WEBHOOK RECEIVED AT:", new Date().toISOString());
   console.log("=======================================================");
 
-  // 1. Full payload aur headers ko deep-print karein taaki [Object] na dikhe
-  console.log("\n[DEBUG] Full Headers Received:");
-  console.dir(req.headers, { depth: null, colors: true });
-
-  console.log("\n[DEBUG] Full Request Body Received:");
-  console.dir(req.body, { depth: null, colors: true });
-
   const WEBHOOK_SECRET = process.env.RAZORPAY_WEBHOOK_SECRET;
   const signature = req.headers["x-razorpay-signature"];
 
-  console.log(`\n[DEBUG] Configured Webhook Secret: "${WEBHOOK_SECRET}"`);
-  console.log(`[DEBUG] Received X-Razorpay-Signature: "${signature}"`);
+  // 🕵️‍♂️ [RAW BODY INSPECTOR] - DETECTING BODY TYPE
+  console.log("\n🔍 [DEBUG] INSPECTING INCOMING REQ.BODY TYPE:");
+
+  if (Buffer.isBuffer(req.body)) {
+    console.log("✅ RESULT: req.body is a RAW BUFFER (Perfect for Webhooks!)");
+    console.log(`📦 Buffer Length: ${req.body.length} bytes`);
+  } else if (typeof req.body === "string") {
+    console.log(
+      "⚠️ RESULT: req.body is a Plain STRING (Raw middleware working, but parsed as string)",
+    );
+  } else if (typeof req.body === "object" && req.body !== null) {
+    console.log("❌ RESULT: req.body is a JAVASCRIPT OBJECT");
+    console.log(
+      "📢 ALERT: Express global middleware already parsed this! Signature might fail.",
+    );
+  } else {
+    console.log(`❓ RESULT: req.body is unknown type: ${typeof req.body}`);
+  }
 
   if (!signature) {
     console.error(
@@ -154,28 +166,40 @@ exports.razorpayWebhook = async (req, res) => {
   }
 
   try {
-    // 2. Signature Validation Details
-    const shasum = crypto.createHmac("sha256", WEBHOOK_SECRET);
+    // 1. Raw body ko string mein extract karna (Safe Conversion)
+    const rawBodyString = Buffer.isBuffer(req.body)
+      ? req.body.toString("utf8")
+      : typeof req.body === "object"
+      ? JSON.stringify(req.body)
+      : req.body;
 
-    // Razorpay signature raw request body bytes par based hoti hai.
-    // express.raw middleware se req.body ek Buffer hota hai.
-    // JSON.stringify(req.body) mat karo, warna bytes change ho jaate hain.
-    const rawBody = Buffer.isBuffer(req.body)
-      ? req.body
-      : Buffer.from(JSON.stringify(req.body));
-    shasum.update(rawBody);
-    const digest = shasum.digest("hex");
+    console.log(`\n[DEBUG] Configured Webhook Secret: "${WEBHOOK_SECRET}"`);
+    console.log(`[DEBUG] Received X-Razorpay-Signature: "${signature}"`);
 
-    console.log(`[DEBUG] Generated Local Digest:       "${digest}"`);
+    // 2. Razorpay SDK Utility Validation
+    const isSignatureValid = validateWebhookSignature(
+      rawBodyString,
+      signature,
+      WEBHOOK_SECRET,
+    );
 
-    if (signature === digest) {
-      console.log("✅ [SUCCESS] Webhook Signature Verified Successfully!");
+    if (isSignatureValid) {
+      console.log("✅ [SUCCESS] Webhook Signature Verified via Razorpay SDK!");
 
-      const event = req.body.event;
+      // JSON parsing safe execution
+      const parsedBody =
+        typeof req.body === "object" && !Buffer.isBuffer(req.body)
+          ? req.body
+          : JSON.parse(rawBodyString);
+
+      console.log("\n[DEBUG] Full Parsed Body Output:");
+      console.dir(parsedBody, { depth: null, colors: true });
+
+      const event = parsedBody.event;
       console.log(`[DEBUG] Handling Event Type: ${event}`);
 
       if (event === "payment.captured") {
-        const paymentData = req.body.payload?.payment?.entity;
+        const paymentData = parsedBody.payload?.payment?.entity;
 
         if (!paymentData) {
           console.error(
@@ -195,60 +219,33 @@ exports.razorpayWebhook = async (req, res) => {
         console.log(`   - Razorpay Payment ID:  ${paymentId}`);
         console.log(`   - Razorpay Order ID:    ${orderId}`);
         console.log(`   - Your DB Order ID:     ${myCustomDbOrderId}`);
-        console.log(`   - User ID from notes:   ${userId}`);
 
-        if (!myCustomDbOrderId) {
-          console.warn(
-            "⚠️ [WARN] 'my_database_order_id' missing from notes! DB update might fail.",
+        // DATABASE UPDATE
+        if (myCustomDbOrderId) {
+          console.log(
+            `[DB] Attempting to update order ${myCustomDbOrderId} status to 'paid'...`,
+          );
+          await db.query(
+            "UPDATE orders SET payment_status = 'paid', total_bv_points = $2 WHERE order_id = $1",
+            [
+              myCustomDbOrderId,
+              `paymentId : ${paymentId} | orderId : ${orderId}`,
+            ],
+          );
+          console.log(
+            `✅ [DB SUCCESS] Order ${myCustomDbOrderId} successfully marked as paid.`,
           );
         }
-
-        // DATABASE UPDATE 1: Order Status
-        console.log(
-          `[DB] Attempting to update order ${myCustomDbOrderId} status to 'paid'...`,
-        );
-        await db.query(
-          "UPDATE orders SET payment_status = 'paid', total_bv_points = $2 WHERE order_id = $1",
-          [
-            myCustomDbOrderId,
-            `paymentId : ${paymentId} | orderId : ${orderId}`,
-          ],
-        );
-        console.log(
-          `✅ [DB SUCCESS] Order ${myCustomDbOrderId} successfully marked as paid.`,
-        );
-
-        // DATABASE UPDATE 2: Transaction Record (If uncommented later)
-        /*
-        console.log(`[DB] Attempting to create transaction entry for User: ${userId}...`);
-        await db.query(
-          `INSERT INTO transactions (user_id, amount, type, category, source_user_id, order_id, remarks, status)
-          VALUES ($1, $2, 'credit', 'purchase', $3, $4, 'Razorpay Payment for purchase order - ${orderId} / ${myCustomDbOrderId}', 'completed')`,
-          [
-            userId,
-            paymentData.amount / 100,
-            userId,
-            myCustomDbOrderId,
-          ],
-        );
-        console.log(`✅ [DB SUCCESS] Transaction record created.`);
-        */
-      } else {
-        console.log(
-          `ℹ️ [INFO] Received event "${event}", no database handling defined for this event.`,
-        );
       }
 
-      // Always respond with 200 OK to Razorpay
       return res.status(200).json({ status: "ok" });
     } else {
       console.error(
-        "❌ [ERROR] Signature Mismatch! Calculated digest does not match incoming header.",
+        "❌ [ERROR] Signature Mismatch! SDK validation returned false.",
       );
       return res.status(400).send("Invalid signature");
     }
   } catch (error) {
-    // Ye block pure webhook ko crash hone se bachayega agar DB error aata hai
     console.error(
       "💥 [CRITICAL ERROR] Exception caught inside webhook handler:",
       error,
