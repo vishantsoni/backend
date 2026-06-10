@@ -14,13 +14,27 @@ const https = require("https");
 //   },
 // });
 
-const transporter = nodemailer.createTransport({
-  host: "smtp.gmail.com",
-  port: 465,
-  secure: true, // Use SSL
+// const transporter = nodemailer.createTransport({
+//   host: "smtp.gmail.com",
+//   port: 465,
+//   secure: true, // Use SSL
+//   auth: {
+//     user: "co0lv7264@gmail.com",
+//     pass: "jtdqxcgvskkejeyq", // Paste the new code here
+//   },
+//   tls: {
+//     // This helps if you are running on localhost or a restricted network
+//     rejectUnauthorized: false,
+//   },
+// });
+
+exports.transporter = nodemailer.createTransport({
+  host: "webmail.feelsafeco.in",
+  port: 587,
+  secure: false, // Use SSL
   auth: {
-    user: "co0lv7264@gmail.com",
-    pass: "jtdqxcgvskkejeyq", // Paste the new code here
+    user: "no-reply@feelsafeco.in",
+    pass: "Vats1992*", // Paste the new code here
   },
   tls: {
     // This helps if you are running on localhost or a restricted network
@@ -114,7 +128,7 @@ exports.sendOTP = async (userId, purpose = "transaction") => {
   if (useEmail) {
     const subject = `Your ${purpose} OTP`;
 
-    await transporter.sendMail({
+    await this.transporter.sendMail({
       to: user.email,
       subject,
       text: message,

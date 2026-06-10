@@ -1,4 +1,8 @@
 const db = require("../config/db");
+const {
+  sendPlacedOrderEmail,
+  sendOrderStatusUpdateEmail,
+} = require("./email/placeOrderEmail");
 
 // const generateOrderId = () => {
 //   const now = new Date();
@@ -616,6 +620,14 @@ exports.placeOrder = async (req, res) => {
       throw new Error("Items required");
     }
 
+    // verify customer name
+    const userRes = await client.query(
+      "SELECT name, email FROM ecom_user WHERE id = $1",
+      [userId],
+    );
+    const customerName = userRes.rows[0]?.name || "Customer";
+    const customerEmail = userRes.rows[0]?.email;
+
     // 1. Target Distributor Identify karein (Fallback Logic)
     let targetDistributorId = distributor_id ? parseInt(distributor_id) : 0;
 
@@ -746,6 +758,7 @@ exports.placeOrder = async (req, res) => {
         stock_source: finalStockSource,
         product_name: productData.product_name,
         product_image: productData.product_image,
+        item_tax: itemTax, // Store item-wise tax for later use in order_items table
       });
 
       subTotal += itemTotal;
@@ -942,6 +955,30 @@ exports.placeOrder = async (req, res) => {
     );
 
     await client.query("COMMIT");
+
+    const orderPayload = {
+      order_id: orderRef,
+      customer_name: customerName,
+      items: validatedItems.map((item) => ({
+        name: item.product_name,
+        quantity: item.qty,
+        price: item.unit_price + item.item_tax,
+      })),
+    };
+
+    // Dispatch email if a valid inbox exists
+    if (customerEmail) {
+      // Wrapped inside a try/catch so that an unhandled SMTP transport failure won't crash your server thread
+      try {
+        await sendPlacedOrderEmail(customerEmail, orderPayload);
+      } catch (mailErr) {
+        console.error(
+          "Mail Dispatch Error (Transaction preserved):",
+          mailErr.message,
+        );
+      }
+    }
+
     res.status(200).json({
       success: true,
       message: "Order placed successfully",
@@ -1284,13 +1321,56 @@ exports.updateOrderStatus = async (req, res) => {
     }
 
     let query = `UPDATE orders SET order_status = $1, updated_at = CURRENT_TIMESTAMP WHERE order_id = $2 RETURNING *`;
+    // let query = `UPDATE orders SET updated_at = CURRENT_TIMESTAMP WHERE order_id = $1 RETURNING *`;
 
     const result = await db.query(query, [order_status, id]);
+    // const result = await db.query(query, [id]);
 
     if (result.rowCount === 0) {
       return res
         .status(404)
         .json({ success: false, message: "Order not found" });
+    }
+
+    const orderData = result.rows[0];
+    let userId = orderData.user_id;
+    let customerEmail = null;
+    let customerName = null;
+    let user_query = `SELECT name, email FROM ecom_user WHERE id = $1`;
+    if (orderData.order_for === "admin-distributor") {
+      userId = orderData.distributor_id;
+      user_query = `
+        SELECT full_name AS name, email
+        FROM users
+        WHERE id = $1
+    `;
+    }
+
+    const userRes = await db.query(user_query, [userId]);
+    if (userRes.rows.length > 0) {
+      customerEmail = userRes.rows[0].email;
+      customerName = userRes.rows[0].name || "Customer";
+    }
+
+    // Dispatch email if a valid inbox exists
+
+    // Get user data
+    if (customerEmail) {
+      // Wrapped inside a try/catch so that an unhandled SMTP transport failure won't crash your server thread
+      try {
+        const orderPayload = {
+          order_id: orderData.order_id,
+          customer_name: customerName,
+          status: order_status,
+        };
+
+        await sendOrderStatusUpdateEmail(customerEmail, orderPayload);
+      } catch (mailErr) {
+        console.error(
+          "Mail Dispatch Error (Transaction preserved):",
+          mailErr.message,
+        );
+      }
     }
 
     // TODO: If 'delivered', trigger commissions to uplines based on total_bv_points

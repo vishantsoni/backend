@@ -3,6 +3,7 @@ const crypto = require("crypto");
 const nodemailer = require("nodemailer");
 
 const db = require("../config/db");
+const { transporter } = require("../utils/otpService");
 
 // Regex helpers (match other controller style)
 const phoneRegex = /^[6-9]\d{9}$/;
@@ -13,26 +14,95 @@ function generateOTP() {
 }
 
 // Keep transporter local to avoid modifying utils/otpService.js (which is tied to `users` table)
-const transporter = nodemailer.createTransport({
-  host: "smtp.gmail.com",
-  port: 465,
-  secure: true,
-  auth: {
-    user: "co0lv7264@gmail.com",
-    pass: "jtdqxcgvskkejeyq",
-  },
-  tls: {
-    rejectUnauthorized: false,
-  },
-});
+// const transporter = nodemailer.createTransport({
+//   host: "smtp.gmail.com",
+//   port: 465,
+//   secure: true,
+//   auth: {
+//     user: "co0lv7264@gmail.com",
+//     pass: "jtdqxcgvskkejeyq",
+//   },
+//   tls: {
+//     rejectUnauthorized: false,
+//   },
+// });
+
+// const transporter = nodemailer.createTransport({
+//   host: "webmail.feelsafeco.in",
+//   port: 587,
+//   secure: false, // Use SSL
+//   auth: {
+//     user: "no-reply@feelsafeco.in",
+//     pass: "Vats1992*", // Paste the new code here
+//   },
+//   tls: {
+//     // This helps if you are running on localhost or a restricted network
+//     rejectUnauthorized: false,
+//   },
+// });
 
 async function sendOtpByContact({ email, phone, otp, purpose }) {
-  const subject = `Your ${purpose} OTP`;
-  const message = `Your OTP is ${otp}. Valid for 5 minutes.`;
+  const subject = `${otp} is your Feel Safe verification code - ( ${purpose} )`;
+  const htmlContent = `
+  <div style="font-family: 'Segoe UI', Arial, sans-serif; max-width: 480px; margin: 0 auto; padding: 24px; border: 1px solid #e2e8f0; border-radius: 12px; background-color: #ffffff;">
+    <!-- Brand Title -->
+    <div style="text-align: center; margin-bottom: 24px;">
+      <h2 style="color: #1C1C1C; margin: 0; font-size: 26px; font-weight: bold; letter-spacing: -0.5px;">Feel Safe</h2>
+    </div>
+    
+    <p style="color: #334155; font-size: 16px; line-height: 1.5; margin-top: 0;">Hello,</p>
+    
+    <p style="color: #334155; font-size: 16px; line-height: 1.5;">We received a request for a <strong>${purpose}</strong> on your account. Please use the verification code below to proceed:</p>
+    
+    <!-- Big OTP Display Box -->
+    <div style="text-align: center; margin: 32px 0;">
+      <div style="font-size: 34px; font-weight: 700; letter-spacing: 6px; color: #00A9E0; background-color: #f8fafc; padding: 14px 28px; border-radius: 8px; display: inline-block; border: 1px dashed #cbd5e1;">
+        ${otp}
+      </div>
+    </div>
+    
+    <p style="color: #64748b; font-size: 14px; text-align: center; margin-bottom: 24px;">
+      This code is valid for <strong>5 minutes</strong>.
+    </p>
+    
+    <hr style="border: none; border-top: 1px solid #e2e8f0; margin: 24px 0;" />
+    
+    <!-- Security Footer -->
+    <p style="color: #94a3b8; font-size: 12px; line-height: 1.5; margin-bottom: 0;">
+      <strong>Security Note:</strong> Never share this OTP with anyone. Our team will never ask for it. If you did not request this, please ignore this message securely.
+    </p>
+  </div>
+  `;
+
+  // Plain text fallback line
+  const plainTextMessage = `Your Feel Safe verification code is ${otp}. Valid for 5 minutes.`;
 
   if (email) {
-    await transporter.sendMail({ to: email, subject, text: message });
-    return "email";
+    try {
+      // Capture the response info object from Nodemailer
+      const info = await transporter.sendMail({
+        from: '"Feel Safe" <no-reply@feelsafeco.in>', // It's best practice to explicitly add your 'from' address
+        to: email,
+        subject,
+        text: plainTextMessage,
+        html: htmlContent,
+      });
+
+      // Check if the email address was rejected by your local mail server
+      if (info.rejected.length > 0) {
+        console.error(`\n\nEmail rejected by server for: ${info.rejected}`);
+        throw new Error(
+          `Email address ${email} was rejected by the mail server.`,
+        );
+      }
+
+      console.log(`Email successfully sent! Message ID: ${info.messageId}`);
+      return "email";
+    } catch (emailError) {
+      // This catches connection issues, authentication failures, or downtime
+      console.error("\n\nNodemailer transport error:", emailError);
+      throw new Error(`Failed to send email OTP: ${emailError.message}`);
+    }
   }
 
   if (phone) {
@@ -124,12 +194,10 @@ exports.resetForgotPassword = async (req, res) => {
     const { identifier, newPassword, otp } = req.body;
 
     if (!identifier || !newPassword || !otp) {
-      return res
-        .status(400)
-        .json({
-          status: false,
-          error: "identifier, newPassword and otp are required",
-        });
+      return res.status(400).json({
+        status: false,
+        error: "identifier, newPassword and otp are required",
+      });
     }
 
     const ecomUser = await resolveEcomUserByIdentifier(identifier);
