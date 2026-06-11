@@ -166,7 +166,7 @@ exports.createNotification = async (req, res) => {
     }
 
     // Validate target_role if provided
-    const validTargetRoles = ["customer", "distributor", "all"];
+    const validTargetRoles = ["customer", "distributor", "all", "website"];
     if (target_role && !validTargetRoles.includes(target_role.toLowerCase())) {
       return res.status(400).json({
         status: false,

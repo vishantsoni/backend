@@ -786,18 +786,18 @@ exports.getDistributorSalesReport = async (req, res) => {
     const summaryQuery = `
       SELECT 
         COUNT(*)::int as total_orders,
-        COALESCE(SUM(o.total_amount), 0)::numeric(12,2) as total_revenue,
-        COALESCE(SUM(o.sub_total), 0)::numeric(12,2) as total_sub_total,
-        COALESCE(SUM(o.tax_amount), 0)::numeric(12,2) as total_tax,
-        COALESCE(SUM(o.shipping_charges), 0)::numeric(12,2) as total_shipping,
-        COALESCE(SUM(o.total_bv_points), 0)::int as total_bv_points,
+        COALESCE(SUM(o.total_amount::numeric), 0)::numeric(12,2) as total_revenue,
+        COALESCE(SUM(o.sub_total::numeric), 0)::numeric(12,2) as total_sub_total,
+        COALESCE(SUM(o.tax_amount::numeric), 0)::numeric(12,2) as total_tax,
+        COALESCE(SUM(o.shipping_charges::numeric), 0)::numeric(12,2) as total_shipping,
+        COALESCE(SUM(o.total_bv_points::int), 0)::int as total_bv_points,
         COALESCE(AVG(o.total_amount), 0)::numeric(12,2) as avg_order_value
       FROM orders o
       WHERE 1=1
       AND o.payment_status = 'paid'
       ${buildDistributorClause}
-      ${from ? ` AND o.created_at >= '${from}'` : ""}
-      ${to ? ` AND o.created_at::date = '${to}'::date` : ""}
+      ${from ? ` AND o.created_at >= $${dateParams.length + 1}` : ""}
+      ${to ? ` AND o.created_at::date = $${dateParams.length + 2}::date` : ""}
     `;
 
     const statusQuery = `
@@ -834,8 +834,8 @@ exports.getDistributorSalesReport = async (req, res) => {
       SELECT 
         COALESCE(DATE(o.created_at), CURRENT_DATE) as date,
         COUNT(*)::int as orders,
-        COALESCE(SUM(o.total_amount), 0)::numeric(12,2) as revenue,
-        COALESCE(SUM(oi.total_item_bv), 0)::int as bv_points
+        COALESCE(SUM(o.total_amount), 0)::numeric(12,2) as revenue
+        
       FROM orders o
       LEFT JOIN order_items oi ON o.id = oi.order_id
       WHERE 1=1
@@ -852,8 +852,8 @@ exports.getDistributorSalesReport = async (req, res) => {
         oi.product_id,
         oi.product_name,
         SUM(oi.qty)::int as total_qty_sold,
-        COUNT(DISTINCT oi.order_id)::int as total_orders,
-        COALESCE(SUM(oi.total_item_price), 0)::numeric(12,2) as total_revenue
+        COUNT(DISTINCT oi.order_id)::int as total_orders
+        
       FROM order_items oi
       JOIN orders o ON oi.order_id = o.id
       WHERE 1=1
