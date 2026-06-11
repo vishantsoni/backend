@@ -277,7 +277,7 @@ CROSS JOIN ecom_stats e;
         COALESCE(AVG(total_amount), 0)::numeric(12,2) as avg_order_value,
         
         -- Distributor Orders Split
-        COUNT(*) FILTER (WHERE distributor_id IS NOT NULL)::int as total_distributor_orders,
+        COUNT(*) FILTER (WHERE distributor_id IS NOT NULL AND order_for LIKE 'admin-distributor')::int as total_distributor_orders,
         COALESCE(SUM(total_amount) FILTER (WHERE distributor_id IS NOT NULL), 0)::numeric(12,2) as total_distributor_revenue,
         
         -- Ecom User Orders Split

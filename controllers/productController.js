@@ -1106,6 +1106,8 @@ exports.updateProduct = async (req, res) => {
     const {
       name,
       description,
+      base_price,
+      discounted_price,
       cat_id,
       f_image,
       g_image,
@@ -1194,6 +1196,19 @@ exports.updateProduct = async (req, res) => {
       values.push(tax_id || null);
       paramIndex++;
     }
+
+    if (base_price !== undefined) {
+      updates.push(`base_price = $${paramIndex}`);
+      values.push(base_price || null);
+      paramIndex++;
+    }
+
+    if (discounted_price !== undefined) {
+      updates.push(`discounted_price = $${paramIndex}`);
+      values.push(discounted_price || null);
+      paramIndex++;
+    }
+
     values.push(productId);
     const query = `UPDATE products SET ${updates.join(
       ", ",

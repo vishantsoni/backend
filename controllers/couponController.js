@@ -189,13 +189,11 @@ exports.updateCoupon = async (req, res) => {
         let val = req.body[key];
         if (key === "applicable_products" || key === "applicable_users") {
           val = parseArrayField(val);
-        } else if (
-          [
-            "discount_amount",
-            "min_order_amount",
-            "max_discount_amount",
-          ].includes(key)
-        ) {
+        } else if (key === "max_discount_amount") {
+          // If max_discount_amount is 0, empty string, or falsy, set it to null
+          const parsed = parseFloat(val);
+          val = parsed === 0 || isNaN(parsed) ? null : parsed;
+        } else if (["discount_amount", "min_order_amount"].includes(key)) {
           val = parseFloat(val) || 0;
         } else if (key === "usage_limit") {
           val = parseInt(val) || 1;

@@ -717,8 +717,8 @@ exports.listAllTransactionsForSuperAdmin = async (req, res) => {
           COALESCE(
             CASE
               WHEN (s.setting_value->>'uv_type') = 'percentage'
-                THEN ((COALESCE(w.company_fund, 0) + COALESCE(w.company_fund, 0)) * (s.setting_value->>'uv_value')::numeric) / 100
-              ELSE ((COALESCE(w.company_fund, 0) + COALESCE(w.company_fund, 0)) / NULLIF((s.setting_value->>'uv_value')::numeric, 0))
+                THEN ((COALESCE(w.company_fund, 0)) * (s.setting_value->>'uv_value')::numeric) / 100
+              ELSE ((COALESCE(w.company_fund, 0)) / NULLIF((s.setting_value->>'uv_value')::numeric, 0))
             END,
           0
           )::numeric(15,2) AS company_fund_uv
