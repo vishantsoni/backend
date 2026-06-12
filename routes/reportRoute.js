@@ -9,6 +9,12 @@ const {
   exportGSTReportExcel,
   exportSalesReportExcel,
 } = require("../controllers/reportsController");
+
+const {
+  getTdsReport,
+  exportTdsReportExcel,
+} = require("../controllers/tdsReportController");
+
 const authMiddleware = require("../middleware/authMiddleware");
 const isAdmin = require("../middleware/isAdmin");
 const isSuperAdmin = require("../middleware/isSuperAdmin");
@@ -36,5 +42,11 @@ router.get("/purchase", authMiddleware, isAdmin, getPurchaseReport);
 // @route   GET api/reports/gst
 router.get("/gst", authMiddleware, getGSTReport);
 router.get("/gst-excel", exportGSTReportExcel);
+
+// @route   GET api/reports/tds
+router.get("/tds", authMiddleware, getTdsReport);
+
+// @route   GET api/reports/tds-excel
+router.get("/tds-excel", authMiddleware, exportTdsReportExcel);
 
 module.exports = router;

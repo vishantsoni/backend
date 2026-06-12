@@ -17,11 +17,28 @@ const {
   updateMember,
 } = require("../controllers/teamController");
 const StateCityController = require("../controllers/stateCityController");
+const multer = require("multer");
 const router = express.Router();
+
+const storage = multer.memoryStorage();
+const upload = multer({
+  storage,
+  limits: { fileSize: 10 * 1024 * 1024 }, // 10MB
+  fileFilter: (req, file, cb) => {
+    if (file.mimetype.startsWith("image/")) {
+      cb(null, true);
+    } else {
+      cb(
+        new Error("Only image files are allowed: jpeg, png, gif, webp"),
+        false,
+      );
+    }
+  },
+});
 
 // banner routes
 router.get("/banner", getBanners);
-router.post("/banner", [authMiddleware, isSuperAdmin], addBanner);
+router.post("/banner", upload.any(), [authMiddleware, isSuperAdmin], addBanner);
 router.delete("/banner/:id", [authMiddleware, isSuperAdmin], deleteBanner);
 
 // static content routes
@@ -32,8 +49,18 @@ router.put("/static/:slug", [authMiddleware, isSuperAdmin], updateStaticData);
 
 // team members
 router.get("/teamMember", getTeamMembers);
-router.post("/teamMember", [authMiddleware, isSuperAdmin], createTeam);
-router.put("/teamMember/:id", [authMiddleware, isSuperAdmin], updateMember);
+router.post(
+  "/teamMember",
+  upload.any(),
+  [authMiddleware, isSuperAdmin],
+  createTeam,
+);
+router.put(
+  "/teamMember/:id",
+  upload.any(),
+  [authMiddleware, isSuperAdmin],
+  updateMember,
+);
 router.delete("/teamMember/:id", [authMiddleware, isSuperAdmin], deleteMember);
 
 // ===== STATE & CITY ROUTES =====
@@ -42,15 +69,47 @@ router.get("/states", StateCityController.getActiveStates);
 router.get("/cities/:stateId", StateCityController.getActiveCitiesByState);
 
 // Admin CRUD - States
-router.post("/admin/states", [authMiddleware, isSuperAdmin], StateCityController.createState);
-router.get("/admin/states", [authMiddleware, isSuperAdmin], StateCityController.getAllStates);
-router.put("/admin/states/:id", [authMiddleware, isSuperAdmin], StateCityController.updateState);
-router.delete("/admin/states/:id", [authMiddleware, isSuperAdmin], StateCityController.deleteState);
+router.post(
+  "/admin/states",
+  [authMiddleware, isSuperAdmin],
+  StateCityController.createState,
+);
+router.get(
+  "/admin/states",
+  [authMiddleware, isSuperAdmin],
+  StateCityController.getAllStates,
+);
+router.put(
+  "/admin/states/:id",
+  [authMiddleware, isSuperAdmin],
+  StateCityController.updateState,
+);
+router.delete(
+  "/admin/states/:id",
+  [authMiddleware, isSuperAdmin],
+  StateCityController.deleteState,
+);
 
 // Admin CRUD - Cities
-router.post("/admin/cities", [authMiddleware, isSuperAdmin], StateCityController.createCity);
-router.get("/admin/cities", [authMiddleware, isSuperAdmin], StateCityController.getAllCities);
-router.put("/admin/cities/:id", [authMiddleware, isSuperAdmin], StateCityController.updateCity);
-router.delete("/admin/cities/:id", [authMiddleware, isSuperAdmin], StateCityController.deleteCity);
+router.post(
+  "/admin/cities",
+  [authMiddleware, isSuperAdmin],
+  StateCityController.createCity,
+);
+router.get(
+  "/admin/cities",
+  [authMiddleware, isSuperAdmin],
+  StateCityController.getAllCities,
+);
+router.put(
+  "/admin/cities/:id",
+  [authMiddleware, isSuperAdmin],
+  StateCityController.updateCity,
+);
+router.delete(
+  "/admin/cities/:id",
+  [authMiddleware, isSuperAdmin],
+  StateCityController.deleteCity,
+);
 
 module.exports = router;

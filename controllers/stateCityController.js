@@ -57,7 +57,9 @@ class StateCityController {
 
       // 4. Add ORDER BY, LIMIT, and OFFSET to the main query
       // These will use the next available parameter numbers (e.g., $2 and $3)
-      query += ` ORDER BY name LIMIT $${params.length + 1} OFFSET $${params.length + 2}`;
+      query += ` ORDER BY name LIMIT $${params.length + 1} OFFSET $${
+        params.length + 2
+      }`;
 
       // 5. Push the pagination values to match the placeholders
       params.push(limitVal, offsetVal);
@@ -356,7 +358,12 @@ class StateCityController {
       const { id } = req.params;
       const { name, state_id, status } = req.body;
 
-      if (!name && state_id === undefined && status === undefined) {
+      // Use undefined checks across the board for consistency
+      if (
+        name === undefined &&
+        state_id === undefined &&
+        status === undefined
+      ) {
         return res
           .status(400)
           .json({ message: "Provide name, state_id or status to update" });
@@ -366,37 +373,50 @@ class StateCityController {
       const params = [];
 
       if (name !== undefined) {
-        updates.push("name = $" + params.length + 1);
         params.push(name.trim());
+        // Wrapping the math in ${} ensures it calculates (length + 1) properly
+        updates.push(`name = $${params.length}`);
       }
+
       if (state_id !== undefined) {
-        updates.push("state_id = $" + params.length + 1);
-        params.push(parseInt(state_id));
+        // Use fallback to null if state_id is provided but empty/invalid
+        const parsedStateId = state_id ? parseInt(state_id, 10) : null;
+        params.push(parsedStateId);
+        updates.push(`state_id = $${params.length}`);
       }
+
       if (status !== undefined) {
-        updates.push("status = $" + params.length + 1);
         params.push(status);
+        updates.push(`status = $${params.length}`);
       }
 
-      params.push(parseInt(id));
+      // Push the ID last so it correctly matches the final placeholder index
+      params.push(parseInt(id, 10));
+      const idPlaceholderIndex = params.length;
 
-      const result = await db.query(
-        `UPDATE cities SET ${updates.join(", ")}, updated_at = CURRENT_TIMESTAMP WHERE id = $${params.length} RETURNING *`,
-        params,
-      );
+      const queryText = `UPDATE cities SET ${updates.join(
+        ", ",
+      )} WHERE id = $${idPlaceholderIndex} RETURNING *`;
+
+      const result = await db.query(queryText, params);
 
       if (result.rowCount === 0) {
         return res.status(404).json({ message: "City not found" });
       }
 
-      res.json({ message: "City updated successfully", data: result.rows[0] });
+      return res.json({
+        message: "City updated successfully",
+        data: result.rows[0],
+      });
     } catch (error) {
       if (error.code === "23505" || error.code === "23503") {
         return res
           .status(409)
-          .json({ message: "Invalid data or duplicate name" });
+          .json({ message: "Invalid data or duplicate name/state reference" });
       }
-      res.status(500).json({ message: "Server error", error: error.message });
+      return res
+        .status(500)
+        .json({ message: "Server error", error: error.message });
     }
   }
 

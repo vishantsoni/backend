@@ -270,7 +270,7 @@ exports.deleteStaff = async (req, res) => {
     const { id } = req.params;
 
     const result = await db.query(
-      "UPDATE staff SET is_active = false, updated_at = CURRENT_TIMESTAMP WHERE id = $1 RETURNING id",
+      "UPDATE staff SET is_active = false WHERE id = $1 RETURNING id",
       [id],
     );
 

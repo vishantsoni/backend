@@ -891,6 +891,7 @@ exports.getDistributorSalesReport = async (req, res) => {
 exports.exportSalesReportExcel = async (req, res) => {
   try {
     const { from, to } = req.query;
+
     const { clause: dateClause, params: dateParams } = buildDateRange(
       from,
       to,
