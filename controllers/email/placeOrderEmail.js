@@ -32,7 +32,7 @@ function generateHtmlItemList(items) {
         <td style="padding: 10px 0; text-align: center; color: #64748b;">${
           item.quantity
         }</td>
-        <td style="padding: 10px 0; text-align: right; font-weight: bold;">$${(
+        <td style="padding: 10px 0; text-align: right; font-weight: bold;">₹${(
           item.price * item.quantity
         ).toFixed(2)}</td>
       </tr>
@@ -48,7 +48,7 @@ function generatePlainTextItems(items) {
   return items
     .map(
       (i) =>
-        `- ${i.name} (x${i.quantity}): $${(i.price * i.quantity).toFixed(2)}`,
+        `- ${i.name} (x${i.quantity}): ₹${(i.price * i.quantity).toFixed(2)}`,
     )
     .join("\n");
 }

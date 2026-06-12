@@ -1,4 +1,5 @@
 const db = require("../config/db");
+const { sendOrderStatusUpdateEmail } = require("./email/placeOrderEmail");
 
 // NOTE: This project currently refunds wallet only via `transactions(category='refund', type='credit')`.
 // Return workflow added here follows that same pattern.
@@ -124,16 +125,42 @@ exports.requestReturn = async (req, res) => {
     );
 
     // Update order status so the rest of the system can reflect return workflow
-    await client.query(
+    const result = await client.query(
       `UPDATE orders
        SET order_status = 'return_requested',
            updated_at = CURRENT_TIMESTAMP
-       WHERE id = $1`,
+       WHERE id = $1 RETURNING *`,
       [parseInt(orderDbId)],
     );
 
-    // NOTE: We intentionally keep the return status transition independent;
-    // adminApproveReturn/warehouseReceiveReturn/refundForReturn will manage the lifecycle in order_returns.
+    const orderData = result.rows[0];
+    let customerEmail = null;
+    let customerName = null;
+    const user_query = `SELECT name, email FROM ecom_user WHERE id = $1`;
+    const userRes = await db.query(user_query, [userId]);
+    if (userRes.rows.length > 0) {
+      customerEmail = userRes.rows[0].email;
+      customerName = userRes.rows[0].name || "Customer";
+    }
+
+    // Get user data
+    if (customerEmail) {
+      // Wrapped inside a try/catch so that an unhandled SMTP transport failure won't crash your server thread
+      try {
+        const orderPayload = {
+          order_id: orderData.order_id,
+          customer_name: customerName,
+          status: "return-requested",
+        };
+
+        await sendOrderStatusUpdateEmail(customerEmail, orderPayload);
+      } catch (mailErr) {
+        console.error(
+          "Mail Dispatch Error (Transaction preserved):",
+          mailErr.message,
+        );
+      }
+    }
 
     await client.query("COMMIT");
     res.status(201).json({
@@ -202,16 +229,49 @@ exports.dis_requestReturn = async (req, res) => {
     );
 
     // Update order status so the rest of the system can reflect return workflow
-    await client.query(
+    const result = await client.query(
       `UPDATE orders
        SET order_status = 'return_requested',
            updated_at = CURRENT_TIMESTAMP
-       WHERE id = $1`,
+       WHERE id = $1 RETURNING *`,
       [parseInt(orderDbId)],
     );
 
     // NOTE: We intentionally keep the return status transition independent;
     // adminApproveReturn/warehouseReceiveReturn/refundForReturn will manage the lifecycle in order_returns.
+
+    const orderData = result.rows[0];
+    let customerEmail = null;
+    let customerName = null;
+    const user_query = `
+        SELECT full_name AS name, email
+        FROM users
+        WHERE id = $1
+    `;
+    const userRes = await db.query(user_query, [userId]);
+    if (userRes.rows.length > 0) {
+      customerEmail = userRes.rows[0].email;
+      customerName = userRes.rows[0].name || "Customer";
+    }
+
+    // Get user data
+    if (customerEmail) {
+      // Wrapped inside a try/catch so that an unhandled SMTP transport failure won't crash your server thread
+      try {
+        const orderPayload = {
+          order_id: orderData.order_id,
+          customer_name: customerName,
+          status: "return-requested",
+        };
+
+        await sendOrderStatusUpdateEmail(customerEmail, orderPayload);
+      } catch (mailErr) {
+        console.error(
+          "Mail Dispatch Error (Transaction preserved):",
+          mailErr.message,
+        );
+      }
+    }
 
     await client.query("COMMIT");
     res.status(201).json({
