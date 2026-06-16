@@ -767,7 +767,11 @@ exports.placeOrder = async (req, res) => {
     }
 
     // 3. Tax & Shipping (Simple Logic)
-    const shippingCharges = await getShippingCharge(client);
+    let shippingCharges = 0;
+    if (subTotal <= 260) {
+      shippingCharges = await getShippingCharge(client);
+    }
+
     const taxAmount = Math.round(totalTax * 100) / 100;
 
     // Coupon base total uses the same `total_amount` concept as couponController.validateCoupon
@@ -891,7 +895,7 @@ exports.placeOrder = async (req, res) => {
     const orderInsert = await client.query(
       `INSERT INTO orders (order_id, user_id, distributor_id, sub_total, 
       tax_amount, shipping_charges, total_amount, total_bv_points, shipping_address, payment_method, order_status, order_for)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, 'pending', $11) RETURNING id`,
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, 'pending', $11) RETURNING *`,
       [
         orderRef,
         userId,
@@ -906,7 +910,8 @@ exports.placeOrder = async (req, res) => {
         order_for,
       ],
     );
-    const dbOrderId = orderInsert.rows[0].id;
+    const newOrderResult = orderInsert.rows[0];
+    const dbOrderId = newOrderResult.id;
 
     // 5. Insert Items & UPDATE INVENTORY (Deduction)
     for (const item of validatedItems) {
@@ -958,11 +963,51 @@ exports.placeOrder = async (req, res) => {
 
     const orderPayload = {
       order_id: orderRef,
+      sakhi_distributor_id: "N/A",
+      transaction_date: "",
+      transaction_description: "Purchase",
+      receipt_no: "",
+      invoice_url: "null",
       customer_name: customerName,
-      items: validatedItems.map((item) => ({
+      residential_address:
+        shipping_address?.landmark +
+        ", " +
+        shipping_address.address_line1 +
+        ", " +
+        shipping_address.address_line2 +
+        ", " +
+        shipping_address.city +
+        ", " +
+        shipping_address.state +
+        ", " +
+        shipping_address.country +
+        ", " +
+        shipping_address.pincode,
+      shipping_address:
+        shipping_address?.landmark +
+        ", " +
+        shipping_address.address_line1 +
+        ", " +
+        shipping_address.address_line2 +
+        ", " +
+        shipping_address.city +
+        ", " +
+        shipping_address.state +
+        ", " +
+        shipping_address.country +
+        ", " +
+        shipping_address.pincode,
+      shipping_contact_no: shipping_address.phone,
+      email_address: customerEmail,
+      shippingCharges: shippingCharges,
+      items: validatedItems.map((item, index) => ({
+        s_no: index + 1,
+        hsn_code: "",
         name: item.product_name,
         quantity: item.qty,
-        price: item.unit_price + item.item_tax,
+        price: item.unit_price,
+        taxRate: item.variant_details.tax_data.percentage,
+        taxAmt: item.item_tax,
       })),
     };
 
