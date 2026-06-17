@@ -1,6 +1,6 @@
 const path = require("path");
 const db = require("../config/db"); // Replace with your actual DB pool configuration path
-const { getOrCreateInvoicePdf } = require("../utils/invoiceService");
+const { getOrCreateInvoicePdf } = require("../utils/invoiceServiceNew");
 
 async function generateInvoice(req, res) {
   try {

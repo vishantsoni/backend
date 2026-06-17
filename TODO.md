@@ -1,11 +1,17 @@
-# TODO
+# TODO - Invoice generation fix
 
-- [x] Add TDS report endpoints to `routes/reportRoute.js`
-  - [ ] `GET /api/reports/tds`
-  - [x] `GET /api/reports/tds-excel`
-- [x] Implement controllers in `controllers/tdsReportController.js`
+## Step 1
 
-  - [x] `getTdsReport`
-  - [x] `exportTdsReportExcel`
+- Add `regenerator-runtime` dependency and ensure it is loaded before `@pdf-lib/fontkit`.
 
-- [ ] Quick sanity check: node require syntax / run tests if available
+## Step 2
+
+- Update `utils/invoiceServiceNew.js` to polyfill `regeneratorRuntime` before requiring fontkit.
+
+## Step 3
+
+- Install dependencies: `npm install`.
+
+## Step 4
+
+- Re-run invoice generation and verify the PDF is created without `regeneratorRuntime` error.

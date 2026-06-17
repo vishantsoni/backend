@@ -15,6 +15,10 @@ const {
   exportTdsReportExcel,
 } = require("../controllers/tdsReportController");
 
+const {
+  generateCommissionTdsBillPdf,
+} = require("../controllers/commissionTdsBillController");
+
 const authMiddleware = require("../middleware/authMiddleware");
 const isAdmin = require("../middleware/isAdmin");
 const isSuperAdmin = require("../middleware/isSuperAdmin");
@@ -48,5 +52,14 @@ router.get("/tds", authMiddleware, getTdsReport);
 
 // @route   GET api/reports/tds-excel
 router.get("/tds-excel", authMiddleware, exportTdsReportExcel);
+
+// @route   POST api/reports/commission-tds/bill-pdf
+// body/query: { from?: 'YYYY-MM-DD', to?: 'YYYY-MM-DD', force?: 'true'|'false' }
+// If from/to not provided, it generates for last month (UTC) cycle.
+router.post(
+  "/commission-tds/bill-pdf",
+  authMiddleware,
+  generateCommissionTdsBillPdf,
+);
 
 module.exports = router;

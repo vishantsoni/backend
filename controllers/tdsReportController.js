@@ -19,6 +19,7 @@ const buildDateRange = (from, to, alias = "t") => {
 exports.getTdsReport = async (req, res) => {
   try {
     const { from, to } = req.query;
+    const userId = req.user.id;
 
     const { clause: dateClause, params: dateParams } = buildDateRange(
       from,
@@ -28,6 +29,7 @@ exports.getTdsReport = async (req, res) => {
 
     const whereClause = `
       WHERE 1=1
+      AND t.user_id = $${dateParams.length + 1}
       AND t.category = 'withdraw'
       AND t.remarks ILIKE '%TDS Deduction%'
       ${dateClause}
@@ -56,9 +58,11 @@ exports.getTdsReport = async (req, res) => {
       LIMIT 500
     `;
 
+    const params = [...dateParams, userId];
+
     const [summaryResult, listResult] = await Promise.all([
-      db.query(summaryQuery, dateParams),
-      db.query(listQuery, dateParams),
+      db.query(summaryQuery, params),
+      db.query(listQuery, params),
     ]);
 
     return res.json({
@@ -98,13 +102,16 @@ exports.exportTdsReportExcel = async (req, res) => {
         t.remarks
       FROM transactions t
       WHERE 1=1
+        AND t.user_id = $${dateParams.length + 1}
         AND t.category = 'withdraw'
         AND t.remarks ILIKE '%TDS Deduction%'
         ${dateClause}
       ORDER BY t.created_at DESC
     `;
 
-    const result = await db.query(reportQuery, dateParams);
+    const params = [...dateParams, req.user.id];
+
+    const result = await db.query(reportQuery, params);
 
     const ExcelJS = require("exceljs");
     const workbook = new ExcelJS.Workbook();

@@ -335,11 +335,6 @@ exports.withdraw = async (req, res) => {
         .json({ success: false, error: "Insufficient withdrawable balance" });
     }
 
-    // get tds
-    const tds_rate = await getTds(db);
-    const tds_amount = amount * (tds_rate / 100);
-    const d_amount = amount - tds_amount;
-
     const client = await db.connect();
     try {
       await client.query("BEGIN");
@@ -355,22 +350,10 @@ exports.withdraw = async (req, res) => {
          VALUES ($1, $2, $3, $4, $5, $6) RETURNING id`,
         [
           userId,
-          d_amount,
+          amount,
           "debit",
           "withdraw",
           remarks || "Bank Withdrawal",
-          "pending_approval",
-        ],
-      );
-      const tdsId = await client.query(
-        `INSERT INTO transactions (user_id, amount, type, category, remarks, status) 
-         VALUES ($1, $2, $3, $4, $5, $6) RETURNING id`,
-        [
-          userId,
-          tds_amount,
-          "debit",
-          "withdraw",
-          "TDS Deduction_" + txnId.rows[0].id,
           "pending_approval",
         ],
       );
