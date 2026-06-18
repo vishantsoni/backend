@@ -18,14 +18,14 @@ const generateOrderId = () => {
   // toISOString() gives "2026-05-09..."
   // slice(2, 10) gives "26-05-09"
   // replace(/-/g, "") gives "260509"
-  const dateStr = now.toISOString().slice(2, 10).replace(/-/g, "");
+  const dateStr = now.toISOString().slice(2, 8).replace(/-/g, "");
 
   const randomNum = Math.floor(Math.random() * 10000);
 
-  return `ORD-${dateStr}-C-${randomNum.toString().padStart(4, "0")}`;
+  return `ORD-${dateStr}-C${randomNum.toString().padStart(4, "0")}`;
 };
 
-console.log(generateOrderId()); // Outputs: ORD-260509-C-XXXX
+// console.log(generateOrderId()); // Outputs: ORD-260509-C-XXXX
 
 // User: Place new order (wallet payment)
 // exports.placeOrder = async (req, res) => {
