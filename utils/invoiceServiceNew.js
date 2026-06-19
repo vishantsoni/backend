@@ -389,7 +389,7 @@ async function getOrCreateInvoicePdf({ order, force = false }) {
     const netAmt = price * qty;
 
     const isInterstate = String(shipping.state || "").toLowerCase() !== "delhi";
-    const taxRate = Number(item.variant_details?.tax_data?.percentage || 18);
+    const taxRate = Number(item.variant_details?.tax_data?.percentage || 0);
 
     let cgstR = "-",
       cgstA = "-",
@@ -439,6 +439,19 @@ async function getOrCreateInvoicePdf({ order, force = false }) {
   });
 
   cols.forEach((x) => drawLine(x, metaY - 15, x, tableY, 0.5));
+
+  // shipping_charges
+  tableY -= 20;
+  drawLine(30, tableY, 565, tableY, 0.5);
+
+  const shippingCharges = Number(order.shipping_charges || 0);
+
+  totalNetAmount += shippingCharges;
+  totalGrandAmount += shippingCharges;
+
+  drawText("Shipping Charge", 75, tableY + 8, 8, true);
+  drawText(shippingCharges.toFixed(2), 255, tableY + 8, 8, true);
+  drawText(shippingCharges.toFixed(2), 520, tableY + 8, 8, true);
 
   // --- TOTAL ROW ---
   drawText("Grand Total", 75, tableY - 14, 8, true);

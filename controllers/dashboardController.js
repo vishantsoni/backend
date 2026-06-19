@@ -53,8 +53,28 @@ exports.getUserDashboardData = async (req, res) => {
         COALESCE(SUM(total_amount), 0)::numeric(12,2) as total_spent,
         COALESCE(AVG(total_amount), 0)::numeric(12,2) as avg_order_value,
         COUNT(*) FILTER (WHERE order_status = 'pending')::int as pending_orders,
+        -- Delivered split: Distributor vs Ecom
+        COUNT(*) FILTER (
+          WHERE distributor_id IS NOT NULL AND order_status = 'delivered'
+        )::int as distributor_delivered_orders,
+        COUNT(*) FILTER (
+          WHERE user_id IS NOT NULL AND order_status = 'delivered'
+        )::int as ecom_delivered_orders,
+
+        -- Global delivered count (kept for backward compatibility)
+        -- Delivered split: Distributor vs Ecom
+        COUNT(*) FILTER (
+          WHERE distributor_id IS NOT NULL AND order_status = 'delivered'
+        )::int as distributor_delivered_orders,
+        COUNT(*) FILTER (
+          WHERE user_id IS NOT NULL AND order_status = 'delivered'
+        )::int as ecom_delivered_orders,
+
+        -- Global delivered count (kept for backward compatibility)
         COUNT(*) FILTER (WHERE order_status = 'delivered')::int as delivered_orders,
         COUNT(*) FILTER (WHERE order_status = 'cancelled')::int as cancelled_orders,
+
+
         COUNT(*) FILTER (WHERE payment_status = 'paid')::int as paid_orders,
         COUNT(*) FILTER (WHERE payment_status = 'unpaid')::int as unpaid_orders
       FROM orders
@@ -286,6 +306,24 @@ CROSS JOIN ecom_stats e;
         
         -- Shared Global Status Filters
         COUNT(*) FILTER (WHERE order_status = 'pending')::int as pending_orders,
+
+        -- Pending split: Distributor vs Ecom
+        COUNT(*) FILTER (
+          WHERE distributor_id IS NOT NULL AND order_status = 'pending'
+        )::int as pending_distributor_order,
+        COUNT(*) FILTER (
+          WHERE user_id IS NOT NULL AND order_status = 'pending'
+        )::int as pending_ecom_order,
+
+
+        -- Delivered split: Distributor vs Ecom
+        COUNT(*) FILTER (
+          WHERE distributor_id IS NOT NULL AND order_status = 'delivered'
+        )::int as distributor_delivered_orders,
+        COUNT(*) FILTER (
+          WHERE user_id IS NOT NULL AND order_status = 'delivered'
+        )::int as ecom_delivered_orders,
+
         COUNT(*) FILTER (WHERE order_status = 'delivered')::int as delivered_orders,
         COUNT(*) FILTER (WHERE order_status = 'cancelled')::int as cancelled_orders,
         COUNT(*) FILTER (WHERE payment_status = 'paid')::int as paid_orders,

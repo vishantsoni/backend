@@ -687,6 +687,8 @@ const ExcelJS = require("exceljs");
 exports.exportGSTReportExcel = async (req, res) => {
   try {
     const { from, to } = req.query;
+    const { id: userId, role } = req.user;
+
     const { clause: dateClause, params: dateParams } = buildDateRange(
       from,
       to,

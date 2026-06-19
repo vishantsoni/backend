@@ -97,6 +97,7 @@ async function generateInvoice(req, res) {
         invoiceNo: orderData.invoice_no || `ORD_${orderData.id}`,
         created_at: orderData.created_at,
       },
+      orderData: orderData,
     });
   } catch (err) {
     console.error("Invoice generation error:", err);

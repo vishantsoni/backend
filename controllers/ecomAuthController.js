@@ -260,6 +260,7 @@ exports.authMe = async (req, res) => {
         e.phone, 
         e.password, 
         e.status,
+        e.distributor_code,
         json_build_object(
             'id', u.id,
             'full_name', u.full_name,
