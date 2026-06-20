@@ -653,9 +653,43 @@ exports.getGSTReport = async (req, res) => {
     const gstSplitQuery = `
       SELECT
         COALESCE(SUM(o.tax_amount), 0)::numeric(12,2) as total_gst,
-        COALESCE(SUM(o.tax_amount / 2), 0)::numeric(12,2) as cgst,
-        COALESCE(SUM(o.tax_amount / 2), 0)::numeric(12,2) as sgst,
-        0::numeric(12,2) as igst
+
+        /* GST split:
+           - If destination state = DELHI => CGST + SGST
+           - Else => IGST only
+
+           Assumption: orders has field customer_state_code (destination).
+        */
+        COALESCE(
+          SUM(
+            CASE
+              WHEN COALESCE((o.shipping_address::jsonb ->> 'state'), '') = 'Delhi' THEN (o.tax_amount / 2)
+              ELSE 0
+            END
+          ),
+          0
+        )::numeric(12,2) as cgst,
+
+        COALESCE(
+          SUM(
+            CASE
+              WHEN COALESCE((o.shipping_address::jsonb ->> 'state'), '') = 'Delhi' THEN (o.tax_amount / 2)
+              ELSE 0
+            END
+          ),
+          0
+        )::numeric(12,2) as sgst,
+
+        COALESCE(
+          SUM(
+            CASE
+              WHEN COALESCE((o.shipping_address::jsonb ->> 'state'), '') = 'Delhi' THEN o.tax_amount              
+              ELSE 0
+            END
+          ),
+          0
+        )::numeric(12,2) as igst
+
       FROM orders o
       WHERE o.payment_status = 'paid'
       ${dateClause} ${roleClause}
@@ -695,6 +729,17 @@ exports.exportGSTReportExcel = async (req, res) => {
       "o",
     );
 
+    let roleClause = "";
+    let roleParams = [];
+
+    // Match GST queries behavior: non-super-admin should export only their own distributor orders
+    if (role !== "super_admin" && role !== "Super Admin") {
+      roleClause = ` AND o.distributor_id = $${dateParams.length + 1}`;
+      roleParams = [userId];
+    }
+
+    const queryParams = [...dateParams, ...roleParams];
+
     // 1. डेटा फेच करें (सिर्फ मुख्य डेटा ले रहे हैं एक्सेल के लिए)
     const reportQuery = `
       SELECT
@@ -704,17 +749,36 @@ exports.exportGSTReportExcel = async (req, res) => {
         CASE WHEN o.order_for LIKE 'distributor_%' THEN 'B2B' ELSE 'B2C' END as type,
         o.sub_total::numeric(12,2) as taxable_value,
         o.tax_amount::numeric(12,2) as gst_amount,
-        (o.tax_amount / 2)::numeric(12,2) as cgst,
-        (o.tax_amount / 2)::numeric(12,2) as sgst,
+
+        /* GST split:
+           - If destination state = DELHI (i.e. intrastate for Delhi), split into CGST+SGST
+           - Else (interstate), report IGST only
+           Assumption: order has fields customer_state_code (destination) and our_state_code (source) OR similar.
+           If your schema uses different names, adjust the CASE condition accordingly.
+        */
+        CASE 
+          WHEN COALESCE(o.state_code, '') = 'DL' THEN (o.tax_amount / 2)::numeric(12,2)
+          ELSE 0::numeric(12,2)
+        END as cgst,
+        CASE 
+          WHEN COALESCE((o.shipping_address::jsonb ->> 'state'), '') = 'DL' THEN (o.tax_amount / 2)::numeric(12,2)
+          ELSE 0::numeric(12,2)
+        END as sgst,
+        CASE 
+          WHEN COALESCE(o.customer_state_code, '') <> 'DL' THEN o.tax_amount::numeric(12,2)
+          ELSE 0::numeric(12,2)
+        END as igst,
+
         o.total_amount::numeric(12,2) as total
       FROM orders o
       LEFT JOIN ecom_user u ON o.user_id = u.id
       LEFT JOIN users d ON o.distributor_id = d.id
       WHERE o.payment_status = 'paid'
       ${dateClause}
+      ${roleClause}
       ORDER BY o.created_at DESC
     `;
-    const result = await db.query(reportQuery, [...dateParams]);
+    const result = await db.query(reportQuery, queryParams);
 
     // 2. Excel Workbook और Worksheet बनाएं
     const workbook = new ExcelJS.Workbook();

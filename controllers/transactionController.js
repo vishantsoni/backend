@@ -85,6 +85,8 @@ exports.verifyOTP = async (req, res) => {
 // Transfer to another user (MLM internal transfer)
 exports.transferToUser = async (req, res) => {
   try {
+    console.log("Fund Transfer initiate");
+
     const userId = req.user.id;
     const { toUserId, amount, remarks, pin } = req.body;
 
@@ -184,7 +186,7 @@ exports.transferToUser = async (req, res) => {
       const balanceRes = await client.query(
         `
           SELECT
-            COALESCE(total_amount, 0) + COALESCE(pending_amount, 0) AS available,
+            COALESCE(withdrawable_amount, 0)  AS available,
             COALESCE(total_amount, 0) AS total_amount
           FROM wallets
           WHERE user_id = $1
@@ -203,27 +205,27 @@ exports.transferToUser = async (req, res) => {
       }
 
       // Deduct from total_amount (existing logic). If total_amount alone is insufficient, reject.
-      const totalAmountOnly = parseFloat(balanceRes.rows[0]?.total_amount || 0);
+      const totalAmountOnly = parseFloat(balanceRes.rows[0]?.available || 0);
       if (totalAmountOnly < amountNum) {
         await client.query("ROLLBACK");
         return res.status(400).json({
           success: false,
           error:
-            "Insufficient withdrawable balance (insufficient total_amount)",
+            "Insufficient withdrawable balance (insufficient Withdrawable Amount)",
         });
       }
 
       // -------- Perform wallet updates --------
       await client.query(
-        "UPDATE wallets SET total_amount = total_amount - $1 WHERE user_id = $2",
+        "UPDATE wallets SET withdrawable_amount = withdrawable_amount - $1 WHERE user_id = $2",
         [amountNum, userId],
       );
 
       // Ensure receiver wallet row exists + credit
       await client.query(
         `
-          INSERT INTO wallets (user_id, total_amount, pending_amount, left_count, right_count, paid_pairs, company_fund)
-          VALUES ($1, $2, 0, 0, 0, 0, 0)
+          INSERT INTO wallets (user_id, total_amount, pending_amount, left_count, right_count, paid_pairs, company_fund, withdrawable_amount)
+          VALUES ($1, $2, 0, 0, 0, 0, 0, 0)
           ON CONFLICT (user_id) DO UPDATE SET
             total_amount = wallets.total_amount + EXCLUDED.total_amount,
             updated_at = CURRENT_TIMESTAMP
@@ -240,7 +242,7 @@ exports.transferToUser = async (req, res) => {
           "debit",
           "transfer",
           toUserId,
-          remarks || "P2P Transfer",
+          remarks + " - from " + userId || "P2P Transfer",
           "completed",
         ],
       );
@@ -253,7 +255,7 @@ exports.transferToUser = async (req, res) => {
           "credit",
           "transfer",
           userId,
-          remarks || "P2P Transfer",
+          remarks + " - to " + toUserId || "P2P Transfer",
           "completed",
         ],
       );
@@ -276,7 +278,7 @@ exports.transferToUser = async (req, res) => {
       client.release();
     }
   } catch (err) {
-    console.error(err);
+    console.error("\n ==== Transfer error - ", err);
     res.status(400).json({ success: false, error: err.message });
   }
 };
