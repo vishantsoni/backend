@@ -47,6 +47,14 @@ router.post(
   isSuperAdmin,
   transactionController.approveWithdrawRequest,
 );
+
+router.post(
+  "/withdraw-requests/:id/paid",
+  authMiddleware,
+  isSuperAdmin,
+  transactionController.paidWithdrawRequest,
+);
+
 router.post(
   "/withdraw-requests/:id/reject",
   authMiddleware,

@@ -464,8 +464,37 @@ exports.d_p_o = async (req, res) => {
     }
 
     const totalAmount = subTotal + taxAmount + shippingCharges - discount;
+
     // 7. Create order
     const orderId = generateOrderId();
+
+    // Wallet payment: deduct from wallets.total_amount and create purchase transaction
+    if (payment_method === "wallet") {
+      // Lock wallet row and validate balance
+      const walletRes = await client.query(
+        `SELECT total_amount FROM wallets WHERE user_id = $1 FOR UPDATE`,
+        [userId],
+      );
+
+      const currentTotal = parseFloat(walletRes.rows[0]?.total_amount || 0);
+      if (currentTotal < totalAmount) {
+        throw new Error("Insufficient wallet balance for this purchase");
+      }
+
+      // Deduct
+      await client.query(
+        `UPDATE wallets SET total_amount = total_amount - $1, updated_at = CURRENT_TIMESTAMP WHERE user_id = $2`,
+        [totalAmount, userId],
+      );
+
+      // Ledger
+      await client.query(
+        `INSERT INTO transactions (user_id, amount, type, category, status, remarks)
+         VALUES ($1, $2, 'debit', 'purchase', 'completed', $3)`,
+        [userId, totalAmount, `Order Purchase: ${orderId}`],
+      );
+    }
+
     const newOrder = await client.query(
       `INSERT INTO orders (order_id, distributor_id, sub_total, tax_amount, shipping_charges, total_amount, total_bv_points, shipping_address, payment_method, order_for, payment_status)
        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 'admin-distributor', $10) RETURNING *`,

@@ -327,7 +327,7 @@ exports.withdraw = async (req, res) => {
 
     // Balance check (only total_amount for withdraw)
     const balanceRes = await db.query(
-      "SELECT COALESCE(total_amount, 0) as total FROM wallets WHERE user_id = $1",
+      "SELECT COALESCE(withdrawable_amount, 0) as total FROM wallets WHERE user_id = $1",
       [userId],
     );
     const total = parseFloat(balanceRes.rows[0]?.total || 0);
@@ -343,7 +343,7 @@ exports.withdraw = async (req, res) => {
 
       // Deduct immediately; admin approval just finalizes.
       await client.query(
-        "UPDATE wallets SET total_amount = total_amount - $1 WHERE user_id = $2",
+        "UPDATE wallets SET withdrawable_amount = withdrawable_amount - $1 WHERE user_id = $2",
         [amount, userId],
       );
 
@@ -414,7 +414,7 @@ exports.listWithdrawRequests = async (req, res) => {
     // Pending list by default
     const statusesToShow = finalStatus
       ? [finalStatus]
-      : ["pending_approval", "approved"];
+      : ["pending_approval", "approved", "completed"];
 
     const query = `
       SELECT
@@ -511,6 +511,51 @@ exports.approveWithdrawRequest = async (req, res) => {
   }
 };
 
+exports.paidWithdrawRequest = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { adminRemark } = req.body;
+
+    const txn = await db.query(
+      `SELECT * FROM transactions WHERE id = $1 AND category = 'withdraw' AND type = 'debit'`,
+      [id],
+    );
+
+    if (!txn.rows[0]) {
+      return res
+        .status(404)
+        .json({ success: false, error: "Withdraw request not found" });
+    }
+
+    if (txn.rows[0].status !== "approved") {
+      return res.status(400).json({
+        success: false,
+        error: `Withdraw request not in approved state (current: ${txn.rows[0].status})`,
+      });
+    }
+
+    await db.query(
+      `UPDATE transactions SET status = $1, remarks = $2 WHERE id = $3`,
+      [
+        "completed",
+        adminRemark
+          ? `${txn.rows[0].remarks || ""} | UTR: ${adminRemark}`
+          : txn.rows[0].remarks,
+        id,
+      ],
+    );
+
+    res.json({
+      success: true,
+      message: "Withdraw request paid",
+      txnId: parseInt(id),
+    });
+  } catch (err) {
+    console.error(err);
+    res.status(400).json({ success: false, error: err.message });
+  }
+};
+
 exports.rejectWithdrawRequest = async (req, res) => {
   try {
     const { id } = req.params;
@@ -542,7 +587,7 @@ exports.rejectWithdrawRequest = async (req, res) => {
 
       // Reverse wallet deduction since withdraw() already deducted on submit.
       await client.query(
-        "UPDATE wallets SET total_amount = total_amount + $1 WHERE user_id = $2",
+        "UPDATE wallets SET withdrawable_amount = withdrawable_amount + $1 WHERE user_id = $2",
         [amount, withdrawUserId],
       );
 

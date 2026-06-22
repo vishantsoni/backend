@@ -57,6 +57,7 @@ exports.getHistory = async (req, res) => {
     let query = `
       SELECT 
         t.id, t.amount as amount_rs,
+        t.user_id,
         (t.amount / NULLIF((s.setting_value->>'uv_value')::numeric, 0)) as amount,
          t.type, t.category, t.status, t.remarks, t.created_at,
         u.username as other_user,
