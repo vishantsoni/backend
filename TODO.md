@@ -1,13 +1,7 @@
-# TODO - Wallet payment purchase transaction
+# TODO
 
-- [x] Add wallet payment_method logic in `controllers/distributor_OrderController.js` within `exports.d_p_o`:
-  - If `payment_method === 'wallet'`, lock wallet row
-  - Check `wallets.total_amount >= orders.total_amount`
-  - Deduct `wallets.total_amount` by `totalAmount`
-  - Insert `transactions` with:
-    - `type='debit'`
-    - `category='purchase'`
-    - `status='completed'`
-    - `remarks` referencing the order
-  - Ensure all happens inside the existing DB transaction
-- [ ] Quick manual test: place a wallet order and verify wallet decreased + transaction row exists.
+- [ ] Identify where level_milestones.reward_cash and cash_com are used during milestone payout.
+- [ ] Change milestone payout logic to treat reward_cash and cash_com as percentage values: compute actual reward_amount and cash_comission_amount first, then update wallet/transactions.
+- [ ] Ensure queries/transactions still store computed rupee amounts (not percentages).
+- [ ] Add basic guards for missing/invalid percentage values.
+- [ ] Run a quick Node syntax check (and/or unit-like execution) if available.

@@ -132,6 +132,8 @@ const distributeCommission = async (client, userId, body) => {
               client,
               upline.id,
               updatedPaidPairs,
+              newPairs,
+              totalMatchingAmount,
             );
             // --- INTEGRATION END ---
 
@@ -177,12 +179,14 @@ const checkAndDistributeMilestone = async (
   client,
   userId,
   currentPaidPairs,
+  newPairs,
+  totalMatchingAmount,
 ) => {
   try {
     // 1. Find the highest milestone the user qualifies for that hasn't been paid yet
     // Linked via level_id as shown in image_6949b4.png
     const milestoneQuery = await client.query(
-      `SELECT m.id, m.milestone_name, m.reward_cash, lc.team_size
+      `SELECT m.id, m.milestone_name, m.reward_cash, m.cash_com, lc.team_size
        FROM level_milestones m
        JOIN level_commissions lc ON m.level_id = lc.id
        WHERE lc.team_size <= $1 
@@ -198,16 +202,6 @@ const checkAndDistributeMilestone = async (
 
     if (milestoneQuery.rows.length > 0) {
       const milestone = milestoneQuery.rows[0];
-
-      // Refresh ID card + QR for this user.
-      // If you have already updated users.business_level in another place,
-      // this function will still regenerate QR using current `business_level`.
-      // We therefore do a fresh read from DB.
-      // const userLevelRes = await client.query(
-      //   "SELECT business_level FROM users WHERE id = $1",
-      //   [userId],
-      // );
-      // const currentBusinessLevel = userLevelRes.rows[0]?.business_level;
 
       try {
         const userInfo = await db.query(
@@ -229,24 +223,53 @@ const checkAndDistributeMilestone = async (
         console.error("ID card generation failed:", e);
       }
 
-      // 2. Update the Company Fund (Non-withdrawable)
+      // reward_cash and cash_com are stored as percentage now.
+      // Calculate actual amounts FIRST, then credit wallets/transactions.
+      const rewardPercent = parseFloat(milestone.reward_cash) || 0;
+      const cashComPercent = parseFloat(milestone.cash_com) || 0;
+
+      // If milestone tables store percentage against totalMatchingAmount,
+      // then actual reward = totalMatchingAmount * (percent/100).
+      // (totalMatchingAmount is the purchase sub_total merged used for milestone eligibility).
+      const rewardAmount =
+        newPairs * (totalMatchingAmount * (rewardPercent / 100));
+      const cashCommissionAmount =
+        newPairs * (totalMatchingAmount * (cashComPercent / 100));
+
+      // 2. Update wallets (separate credits)
+      // reward_cash -> wallets.company_fund
       await client.query(
-        `UPDATE wallets 
-         SET company_fund = company_fund + $1 
+        `UPDATE wallets
+         SET company_fund = company_fund + $1,
+         total_amount = total_amount + $3
          WHERE user_id = $2`,
-        [milestone.reward_cash, userId],
+        [rewardAmount, userId, cashCommissionAmount],
       );
 
-      // 3. Log the milestone transaction
+      // 3. Log separate transactions
+      // 3a) Milestone reward transaction
       await client.query(
         `INSERT INTO transactions (user_id, amount, type, category, status, remarks)
          VALUES ($1, $2, 'credit', 'milestone', 'completed', $3)`,
         [
           userId,
-          milestone.reward_cash,
-          `Milestone Reached: ${milestone.milestone_name} (Team Size: ${milestone.team_size})`,
+          rewardAmount,
+          `Milestone Reached: ${milestone.milestone_name} (Team Size: ${milestone.team_size}) | reward_cash=${rewardPercent}%`,
         ],
       );
+
+      // 3b) Cash commission transaction
+      if (cashCommissionAmount > 0) {
+        await client.query(
+          `INSERT INTO transactions (user_id, amount, type, category, status, remarks)
+           VALUES ($1, $2, 'credit', 'commission', 'completed', $3)`,
+          [
+            userId,
+            cashCommissionAmount,
+            `Milestone Cash Commission: ${milestone.milestone_name} (Team Size: ${milestone.team_size}) | cash_com=${cashComPercent}%`,
+          ],
+        );
+      }
 
       console.log(
         `Milestone ${milestone.milestone_name} credited to User ${userId}`,

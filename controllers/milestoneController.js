@@ -74,7 +74,8 @@ exports.getMilestoneById = async (req, res) => {
 
 exports.createMilestone = async (req, res) => {
   try {
-    const { level_id, milestone_name, tour_details, reward_cash } = req.body;
+    const { level_id, milestone_name, tour_details, reward_cash, cash_com } =
+      req.body;
 
     if (!level_id || isNaN(parseInt(level_id)) || parseInt(level_id) < 1) {
       return res.status(400).json({
@@ -103,13 +104,22 @@ exports.createMilestone = async (req, res) => {
       });
     }
 
+    const parsedCashCom = cash_com !== undefined ? parseFloat(cash_com) : 0.0;
+    if (isNaN(parsedCashCom) || parsedCashCom < 0) {
+      return res.status(400).json({
+        status: false,
+        message: "cash_com must be a non-negative number",
+      });
+    }
+
     const result = await db.query(
-      "INSERT INTO level_milestones (level_id, milestone_name, tour_details, reward_cash) VALUES ($1, $2, $3, $4) RETURNING *",
+      "INSERT INTO level_milestones (level_id, milestone_name, tour_details, reward_cash, cash_com) VALUES ($1, $2, $3, $4, $5) RETURNING *",
       [
         parseInt(level_id),
         milestone_name.trim(),
         tour_details || null,
         parsedRewardCash,
+        parsedCashCom,
       ],
     );
 
@@ -130,7 +140,8 @@ exports.createMilestone = async (req, res) => {
 exports.updateMilestone = async (req, res) => {
   try {
     const { id } = req.params;
-    const { level_id, milestone_name, tour_details, reward_cash } = req.body;
+    const { level_id, milestone_name, tour_details, reward_cash, cash_com } =
+      req.body;
 
     const parsedId = parseInt(id);
     if (isNaN(parsedId) || parsedId < 1) {
@@ -188,6 +199,19 @@ exports.updateMilestone = async (req, res) => {
       }
       updates.push(`reward_cash = $${paramIndex}`);
       values.push(parsedRewardCash);
+      paramIndex++;
+    }
+
+    if (cash_com !== undefined) {
+      const parsedCashCom = parseFloat(cash_com);
+      if (isNaN(parsedCashCom) || parsedCashCom < 0) {
+        return res.status(400).json({
+          status: false,
+          message: "cash_com must be a non-negative number",
+        });
+      }
+      updates.push(`cash_com = $${paramIndex}`);
+      values.push(parsedCashCom);
       paramIndex++;
     }
 
