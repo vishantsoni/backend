@@ -10,8 +10,8 @@ const {
 const authMiddleware = require("../middleware/authMiddleware");
 const isSuperAdmin = require("../middleware/isSuperAdmin");
 // tax routes
-router.get("/", [authMiddleware, isSuperAdmin], getTax);
-router.get("/:id", [authMiddleware, isSuperAdmin], getTaxById);
+router.get("/", [authMiddleware], getTax);
+router.get("/:id", [authMiddleware], getTaxById);
 router.post("/", [authMiddleware, isSuperAdmin], createTax);
 router.put("/:id", [authMiddleware, isSuperAdmin], updateTax);
 router.delete("/:id", [authMiddleware, isSuperAdmin], deleteTax);
