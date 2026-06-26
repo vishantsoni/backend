@@ -45,7 +45,7 @@ router.get("/purchase", authMiddleware, isAdmin, getPurchaseReport);
 
 // @route   GET api/reports/gst
 router.get("/gst", authMiddleware, getGSTReport);
-router.get("/gst-excel", exportGSTReportExcel);
+router.get("/gst-excel", authMiddleware, exportGSTReportExcel);
 
 // @route   GET api/reports/tds
 router.get("/tds", authMiddleware, getTdsReport);

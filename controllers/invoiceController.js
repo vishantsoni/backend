@@ -32,13 +32,18 @@ async function generateInvoice(req, res) {
         END as user_type,
         COALESCE(u.name, d.full_name, d.username) as user_name, 
         COALESCE(u.phone, d.phone) as user_phone,
+        COALESCE(u.email, d.email) as user_email,
+        COALESCE('-', d.gstin) as user_gstin,
         CASE 
           WHEN o.distributor_id IS NOT NULL THEN 
             JSON_BUILD_OBJECT(
               'id', d.id,
               'name', COALESCE(d.full_name, d.username),
               'phone', d.phone,
-              'username', d.username
+              'username', d.username,
+              'email', d.email,
+              'gstin', d.gstin,
+              'referral_id', d.referral_code
             )
           ELSE NULL 
         END as distributor,
@@ -69,6 +74,67 @@ async function generateInvoice(req, res) {
         message: "Order details record not found",
       });
     }
+
+    if (
+      req.user.role !== "Super Admin" &&
+      orderData.order_status !== "delivered"
+    ) {
+      return res.status(202).json({
+        success: false,
+        message: "The invoice will be generated once the order is delivered.",
+      });
+    }
+
+    // 🔹 1. GENERATE RECEIPT NO
+    // Convert ORD-2606-C9105 -> FS-2606-RN-C9105
+    let receiptNo = "";
+    if (orderData.order_id) {
+      receiptNo = orderData.order_id
+        .replace(/^ORD-/, "FS-")
+        .replace(/-([A-Z0-9]+)$/, "-RN-$1");
+    } else {
+      receiptNo = `FS-RN-${orderData.id}`;
+    }
+
+    // 🔹 2. GENERATE DYNAMIC INVOICE NO
+    let invoiceNo = orderData.invoice_no;
+    let finalSno = orderData.invoice_sno; // मान लेते हैं कि आप इसे भी स्टोर कर रहे हैं
+
+    if (!invoiceNo) {
+      // S.No Counter अपडेट करें (+11 इंक्रीमेंट लॉक के साथ)
+      const seqRes = await db.query(
+        "UPDATE invoice_settings SET last_sno = last_sno + 11 WHERE id = 1 RETURNING last_sno",
+      );
+
+      // पहली बार के लिए 1, अगली बार के लिए (1 + 11) = 12, फिर 23...
+      const currentSno = seqRes.rows[0].last_sno - 11;
+      finalSno = currentSno;
+
+      // Date Format: Year (2627) और Month (06) निकालें
+      const now = new Date();
+      const currentYearShort = now.getFullYear().toString().slice(-2); // "26"
+      const nextYearShort = (now.getFullYear() + 1).toString().slice(-2); // "27"
+      const invoiceYearFormat = `${currentYearShort}${nextYearShort}`; // "2627"
+      const invoiceMonthFormat = String(now.getMonth() + 1).padStart(2, "0"); // "06"
+
+      // User Type Code: D = Distributor, C = Customer/User
+      const typeCode = orderData.user_type === "Distributor" ? "D" : "C";
+
+      // Combine Frame: FS-2627-06-IN-D137
+      invoiceNo = `FS-${invoiceYearFormat}-${invoiceMonthFormat}-IN-${typeCode}${currentSno}`;
+
+      // न्यूली जनरेटेड नंबर्स को orders टेबल में सेव करें
+      await db.query(
+        "UPDATE orders SET invoice_no = $1, receipt_no = $2 WHERE id = $3",
+        [invoiceNo, receiptNo, orderData.id],
+      );
+
+      // स्थानीय ऑब्जेक्ट डेटा को अपडेट करें ताकि PDF में सही डेटा पास हो
+      orderData.invoice_no = invoiceNo;
+      orderData.receipt_no = receiptNo;
+    }
+
+    await db.query("COMMIT");
 
     const force =
       String(req.query.force || req.body?.force || "false").toLowerCase() ===

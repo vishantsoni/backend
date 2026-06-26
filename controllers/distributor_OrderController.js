@@ -82,7 +82,7 @@ const distributeCommission = async (client, userId, body) => {
       if (newPairs > 0) {
         // C. Naya Logic: Find Pending Order in Opposite Leg
         const pendingMatch = await client.query(
-          `SELECT o.id, o.sub_total, o.total_amount FROM orders o
+          `SELECT o.id, o.sub_total, o.total_amount, o.order_id FROM orders o
            JOIN users u ON o.distributor_id = u.id
            WHERE u.binary_path <@ $1 AND o.commission_status = 'pending'
            ORDER BY o.created_at ASC LIMIT 1`,
@@ -144,7 +144,7 @@ const distributeCommission = async (client, userId, body) => {
                 upline.id,
                 commissionAmount,
                 userId,
-                `Pair Match: Order ${matchedOrder.id} & Current Order`,
+                `Pair Match: Order ${matchedOrder.order_id} & Current Order`,
               ],
             );
           }

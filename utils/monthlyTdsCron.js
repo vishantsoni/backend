@@ -16,7 +16,10 @@ function getLastDayRangeUTC() {
   const from = new Date(Date.UTC(prevYear, prevMonthAdj, 1, 0, 0, 0));
   const toExclusive = new Date(Date.UTC(year, month, 1, 0, 0, 0));
 
-  return { from, toExclusive, prevYear, prevMonth: prevMonthAdj };
+  // DisplayTo: पिछले महीने की आखिरी तारीख की रात 11:59:59 (डेटाबेस और PDF के लिए)
+  const displayTo = new Date(toExclusive.getTime() - 1000); // 1 सेकंड घटाया
+
+  return { from, toExclusive, displayTo, prevYear, prevMonth: prevMonthAdj };
 }
 
 async function getTdsPercent(client) {
@@ -43,7 +46,8 @@ async function processMonthlyTds() {
 
   const client = await db.connect();
   try {
-    const { from, toExclusive, prevYear, prevMonth } = getLastDayRangeUTC();
+    const { from, toExclusive, displayTo, prevYear, prevMonth } =
+      getLastDayRangeUTC();
 
     // Idempotency: store processed month marker.
     // If the table doesn't exist yet, this query will fail; we'll add migration in next step.
@@ -169,7 +173,7 @@ async function processMonthlyTds() {
     console.log("\ntable Inserting in cylcle...");
     await client.query(
       "INSERT INTO monthly_tds_cycles (cycle_key, from_date, to_date_exclusive) VALUES ($1,$2,$3)",
-      [cycleKey, from.toISOString(), toExclusive.toISOString()],
+      [cycleKey, from.toISOString(), displayTo.toISOString()],
     );
 
     await client.query("COMMIT");

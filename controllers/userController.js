@@ -564,6 +564,7 @@ exports.createUser = async (req, res) => {
       agreedToTerms: agreed_to_terms,
       password,
       referrer_id,
+      gstin: gst_no,
     } = req.body;
 
     if (!password) {
@@ -685,7 +686,7 @@ exports.createUser = async (req, res) => {
         nominee_name, nominee_relationship, nominee_age, nominee_contact, nominee_aadhaar,
         business_level, agreed_to_terms, kyc_status,
         username, password_hash, referrer_id,
-        node_path, binary_path, position, is_active
+        node_path, binary_path, position, is_active, gstin
       ) VALUES (
         $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,
         $13,$14,$15,$16,$17,
@@ -693,7 +694,7 @@ exports.createUser = async (req, res) => {
         $21,$22,$23,$24,$25,
         $26,$27,$28,
         $29,$30,$31,
-        $32,$33,$34, $35
+        $32,$33,$34, $35, $36
       ) RETURNING *`,
       [
         full_name || null,
@@ -731,6 +732,7 @@ exports.createUser = async (req, res) => {
         binaryPath,
         position,
         false,
+        gst_no || "",
       ],
     );
 
@@ -771,12 +773,10 @@ exports.uploadKycDocuments = async (req, res) => {
     console.log("Files received:", req.files);
 
     if (!userId) {
-      return res
-        .status(400)
-        .json({
-          status: false,
-          error: "User id is required (form-data field name: id)",
-        });
+      return res.status(400).json({
+        status: false,
+        error: "User id is required (form-data field name: id)",
+      });
     }
 
     if (!req.files || req.files.length === 0) {

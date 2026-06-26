@@ -84,12 +84,12 @@ async function getOrCreateInvoicePdf({ order, force = false }) {
       process.cwd(),
       "assets",
       "image",
-      "image4.jpeg",
+      "image4.png",
     );
     const watermarkBytes = await fs.readFile(watermarkPath);
     embeddedWatermark = await pdfDoc.embedPng(watermarkBytes);
   } catch (err) {
-    console.warn("Watermark image missing at /assets/image/watermark.png");
+    console.warn("Watermark image missing at - ", err);
   }
 
   // Load Payment QR PNG
@@ -240,25 +240,27 @@ async function getOrCreateInvoicePdf({ order, force = false }) {
   drawLine(310, metaY, 310, metaY - 45, 0.5);
 
   drawText("Sakhi Distributor ID No.:", 35, metaY - 11, 8, true);
+  drawText(order.distributor.referral_id || "N/A", 150, metaY - 11, 8);
   drawLine(30, metaY - 15, 310, metaY - 15, 0.5);
 
   drawText("Order No:", 35, metaY - 26, 8, true);
-  drawText(order.invoice_no || order.order_id || orderIdStr, 85, metaY - 26, 8);
+  drawText(order.order_id || "-", 85, metaY - 26, 8);
   drawLine(30, metaY - 30, 310, metaY - 30, 0.5);
 
   drawText("Receipt No:", 35, metaY - 41, 8, true);
+  drawText(order.receipt_no || order.order_id || orderIdStr, 85, metaY - 41, 8);
 
   drawText("Invoice Date:", 315, metaY - 11, 8, true);
   drawLine(310, metaY - 15, 565, metaY - 15, 0.5);
   drawText(orderDate, 410, metaY - 11, 8);
 
   drawText("Invoice No:", 315, metaY - 33, 8, true);
-  // drawText(
-  //   order.invoice_no || order.order_id || orderIdStr,
-  //   410,
-  //   metaY - 33,
-  //   8,
-  // );
+  drawText(
+    order.invoice_no || order.order_id || orderIdStr,
+    410,
+    metaY - 33,
+    8,
+  );
 
   metaY -= 45;
   drawLine(30, metaY, 565, metaY, 0.5);
@@ -297,8 +299,8 @@ async function getOrCreateInvoicePdf({ order, force = false }) {
     billing.state || "",
     billing.pincode || "",
     order.user_phone || billing.phone || "",
-    order.user_email || "",
-    order.user_gstin || "",
+    order.user_email || billing.email || "",
+    order.user_gstin || billing.gstin || "",
   ];
 
   const rightVals = [

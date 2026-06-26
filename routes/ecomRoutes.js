@@ -102,9 +102,11 @@ router.patch(
 const {
   sendForgotPasswordOtp,
   resetForgotPassword,
+  changePassword,
 } = require("../controllers/ecomPasswordController");
 router.post("/auth/forgot-password-otp", sendForgotPasswordOtp);
 router.post("/auth/reset-password", resetForgotPassword);
+router.put("/auth/change-password", ecomAuth, changePassword);
 
 router.get("/auth/me", ecomAuth, authMe);
 

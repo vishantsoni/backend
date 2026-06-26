@@ -194,7 +194,7 @@ exports.generateCommissionTdsBillPdf = async (req, res) => {
     ]);
 
     const userRes = await db.query(
-      "SELECT full_name, phone, email, address, city, state, pin FROM users WHERE id = $1",
+      "SELECT full_name, phone, email, address, city, state, pin, gstin, referral_code FROM users WHERE id = $1",
       [userId],
     );
     const userData = userRes.rows[0] || {};
@@ -216,6 +216,8 @@ exports.generateCommissionTdsBillPdf = async (req, res) => {
         city: userData.city || "",
         state: userData.state || "",
         pinCode: userData.pin || "",
+        gstin: userData.gstin || "N/A",
+        referral_code: userData.referral_code || "-",
       },
       force: forceBool,
     });

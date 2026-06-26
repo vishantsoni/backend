@@ -25,12 +25,11 @@ exports.getSalesReport = async (req, res) => {
     const summaryQuery = `
       SELECT 
         COUNT(*)::int as total_orders,
-        COALESCE(SUM(total_amount), 0)::numeric(12,2) as total_revenue,
-        COALESCE(SUM(sub_total), 0)::numeric(12,2) as total_sub_total,
-        COALESCE(SUM(tax_amount), 0)::numeric(12,2) as total_tax,
-        COALESCE(SUM(shipping_charges), 0)::numeric(12,2) as total_shipping,
-        COALESCE(SUM(total_bv_points), 0)::int as total_bv_points,
-        COALESCE(AVG(total_amount), 0)::numeric(12,2) as avg_order_value
+        COALESCE(SUM(o.total_amount::numeric), 0)::numeric(12,2) as total_revenue,
+        COALESCE(SUM(o.sub_total::numeric), 0)::numeric(12,2) as total_sub_total,
+        COALESCE(SUM(o.tax_amount::numeric), 0)::numeric(12,2) as total_tax,
+        COALESCE(SUM(o.shipping_charges::numeric), 0)::numeric(12,2) as total_shipping,
+        COALESCE(AVG(o.total_amount::numeric), 0)::numeric(12,2) as avg_order_value
       FROM orders o
       WHERE 1=1
     `;
@@ -40,12 +39,12 @@ exports.getSalesReport = async (req, res) => {
     // 2. Order status breakdown
     const statusQuery = `
       SELECT 
-        order_status,
+        o.order_status,
         COUNT(*)::int as count,
-        COALESCE(SUM(total_amount), 0)::numeric(12,2) as revenue
+        COALESCE(SUM(o.total_amount::numeric), 0)::numeric(12,2) as revenue
       FROM orders o
       WHERE 1=1
-      GROUP BY order_status
+      GROUP BY o.order_status
       ORDER BY count DESC
     `;
     const statusResult = await db.query(statusQuery);
@@ -53,12 +52,12 @@ exports.getSalesReport = async (req, res) => {
     // 3. Payment status breakdown
     const paymentStatusQuery = `
       SELECT 
-        payment_status,
+        o.payment_status,
         COUNT(*)::int as count,
-        COALESCE(SUM(total_amount), 0)::numeric(12,2) as revenue
+        COALESCE(SUM(o.total_amount::numeric), 0)::numeric(12,2) as revenue
       FROM orders o
       WHERE 1=1
-      GROUP BY payment_status
+      GROUP BY o.payment_status
       ORDER BY count DESC
     `;
     const paymentStatusResult = await db.query(paymentStatusQuery);
@@ -719,6 +718,7 @@ exports.getGSTReport = async (req, res) => {
 const ExcelJS = require("exceljs");
 
 exports.exportGSTReportExcel = async (req, res) => {
+  console.log("\n ============= GTS EXCEL EXPORTING ==========");
   try {
     const { from, to } = req.query;
     const { id: userId, role } = req.user;
@@ -750,24 +750,30 @@ exports.exportGSTReportExcel = async (req, res) => {
         o.sub_total::numeric(12,2) as taxable_value,
         o.tax_amount::numeric(12,2) as gst_amount,
 
-        /* GST split:
-           - If destination state = DELHI (i.e. intrastate for Delhi), split into CGST+SGST
-           - Else (interstate), report IGST only
-           Assumption: order has fields customer_state_code (destination) and our_state_code (source) OR similar.
-           If your schema uses different names, adjust the CASE condition accordingly.
-        */
-        CASE 
-          WHEN COALESCE(o.state_code, '') = 'DL' THEN (o.tax_amount / 2)::numeric(12,2)
-          ELSE 0::numeric(12,2)
-        END as cgst,
-        CASE 
-          WHEN COALESCE((o.shipping_address::jsonb ->> 'state'), '') = 'DL' THEN (o.tax_amount / 2)::numeric(12,2)
-          ELSE 0::numeric(12,2)
-        END as sgst,
-        CASE 
-          WHEN COALESCE(o.customer_state_code, '') <> 'DL' THEN o.tax_amount::numeric(12,2)
-          ELSE 0::numeric(12,2)
-        END as igst,
+        /* GST split mapped exactly same as getGSTReport */
+        COALESCE(
+          CASE
+            WHEN COALESCE((o.shipping_address::jsonb ->> 'state'), '') = 'Delhi' THEN (o.tax_amount / 2)
+            ELSE 0
+          END,
+          0
+        )::numeric(12,2) as cgst,
+
+        COALESCE(
+          CASE
+            WHEN COALESCE((o.shipping_address::jsonb ->> 'state'), '') = 'Delhi' THEN (o.tax_amount / 2)
+            ELSE 0
+          END,
+          0
+        )::numeric(12,2) as sgst,
+
+        COALESCE(
+          CASE
+            WHEN COALESCE((o.shipping_address::jsonb ->> 'state'), '') != 'Delhi' THEN o.tax_amount              
+            ELSE 0
+          END,
+          0
+        )::numeric(12,2) as igst,
 
         o.total_amount::numeric(12,2) as total
       FROM orders o
@@ -793,6 +799,7 @@ exports.exportGSTReportExcel = async (req, res) => {
       { header: "Taxable Value (₹)", key: "taxable_value", width: 15 },
       { header: "CGST (₹)", key: "cgst", width: 12 },
       { header: "SGST (₹)", key: "sgst", width: 12 },
+      { header: "IGST (₹)", key: "igst", width: 12 },
       { header: "Total GST (₹)", key: "gst_amount", width: 15 },
       { header: "Grand Total (₹)", key: "total", width: 15 },
     ];

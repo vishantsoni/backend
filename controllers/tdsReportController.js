@@ -17,9 +17,12 @@ const buildDateRange = (from, to, alias = "t") => {
 // @desc    Get TDS Report (withdraw transactions where remarks contain 'TDS Deduction')
 // @route   GET /api/reports/tds
 exports.getTdsReport = async (req, res) => {
+  console.log("user - ", req.user);
+
   try {
     const { from, to } = req.query;
     const userId = req.user.id;
+    const role = req.user.role;
 
     const { clause: dateClause, params: dateParams } = buildDateRange(
       from,
@@ -27,13 +30,31 @@ exports.getTdsReport = async (req, res) => {
       "t",
     );
 
-    const whereClause = `
-      WHERE 1=1
-      AND t.user_id = $${dateParams.length + 1}
-      AND t.category = 'withdraw'
-      AND t.remarks ILIKE '%TDS Deduction%'
-      ${dateClause}
-    `;
+    // 🔹 FIX 1: params को यहीं डिफाइन करें और डेट के पैरामीटर्स डालें
+    let params = [...dateParams];
+    let whereClause = "";
+
+    // 🔹 FIX 2: Role-based logic और parameters को सिंक करें
+    if (role === "admin" || role === "super_admin" || role === "Super Admin") {
+      // एडमिन के लिए सभी का TDS दिखेगा (No user_id constraint)
+      whereClause = `
+        WHERE 1=1       
+        AND t.category = 'withdraw'
+        AND t.remarks ILIKE '%TDS Deduction%'
+        ${dateClause}
+      `;
+    } else {
+      // रेगुलर यूजर सिर्फ अपना TDS देख पाएगा
+      params.push(userId); // अब यह परफेक्टली काम करेगा क्योंकि params ऊपर डिक्लेअर हो चुका है
+
+      whereClause = `
+        WHERE 1=1
+        AND t.user_id = $${params.length}
+        AND t.category = 'withdraw'
+        AND t.remarks ILIKE '%TDS Deduction%'
+        ${dateClause}
+      `;
+    }
 
     const summaryQuery = `
       SELECT
@@ -51,14 +72,17 @@ exports.getTdsReport = async (req, res) => {
         t.amount,
         t.category,
         t.type,
-        t.remarks
+        t.remarks,
+        u.full_name as user_name,  -- Users टेबल से नाम
+        u.phone as user_phone      -- Users टेबल से फ़ोन नंबर
       FROM transactions t
+      LEFT JOIN users u ON t.user_id = u.id  -- User_id के बेस पर जॉइन
       ${whereClause}
       ORDER BY t.created_at DESC
       LIMIT 500
     `;
 
-    const params = [...dateParams, userId];
+    // 🔹 FIX 3: नीचे से पुरानी 'const params = ...' वाली लाइन को हटा दिया गया है
 
     const [summaryResult, listResult] = await Promise.all([
       db.query(summaryQuery, params),

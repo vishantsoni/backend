@@ -136,12 +136,20 @@ exports.transferToUser = async (req, res) => {
     try {
       await client.query("BEGIN");
 
+      const toUserRes = await client.query(
+        `SELECT referral_code FROM users WHERE id = $1`,
+        [toUserId],
+      );
+
+      const toUserInfo = toUserRes.rows[0];
       // -------- Verify sender PIN --------
       const senderPinRes = await client.query(
-        "SELECT transaction_pin_hash FROM users WHERE id = $1 FOR UPDATE",
+        "SELECT transaction_pin_hash, referral_code FROM users WHERE id = $1 FOR UPDATE",
         [userId],
       );
       const senderPinHash = senderPinRes.rows[0]?.transaction_pin_hash;
+      const referral_code = senderPinRes.rows[0]?.referral_code;
+
       if (!senderPinHash) {
         await client.query("ROLLBACK");
         return res.status(400).json({
@@ -242,7 +250,7 @@ exports.transferToUser = async (req, res) => {
           "debit",
           "transfer",
           toUserId,
-          remarks + " - from " + userId || "P2P Transfer",
+          remarks + " - to " + toUserInfo.referral_code || "P2P Transfer",
           "completed",
         ],
       );
@@ -255,7 +263,8 @@ exports.transferToUser = async (req, res) => {
           "credit",
           "transfer",
           userId,
-          remarks + " - to " + toUserId || "P2P Transfer",
+          remarks + " - From " + referral_code + " | TID - " + txnIdSender ||
+            "P2P Transfer",
           "completed",
         ],
       );

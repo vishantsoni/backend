@@ -26,7 +26,7 @@ router.get("/my", ecomAuth, getMyOrders); // My orders
 
 router.get("/", [authMiddleware, isSuperAdmin], getAllOrders); // Admin all
 router.get("/details/:id", getOrderDetail); // Detail (admin/user own)
-router.put("/:id/status", [authMiddleware, isSuperAdmin], updateOrderStatus);
+router.put("/:id/status", [authMiddleware], updateOrderStatus);
 router.delete("/:id", [authMiddleware, isSuperAdmin], cancelOrder);
 
 // -------- Order Return Flow --------

@@ -40,7 +40,7 @@ router.post(
   uploadPolicy,
 );
 
-router.get("/", authMiddleware, isSuperAdmin, listPolicies);
+router.get("/", authMiddleware, listPolicies);
 
 router.get("/:id", authMiddleware, isSuperAdmin, getPolicyById);
 

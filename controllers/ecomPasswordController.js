@@ -262,3 +262,37 @@ exports.resetForgotPassword = async (req, res) => {
     res.status(500).json({ status: false, error: "Server error" });
   }
 };
+
+exports.changePassword = async (req, res) => {
+  try {
+    const userId = req.user.id;
+    const { currentPassword, newPassword } = req.body;
+
+    const user = await db.query(
+      "SELECT password FROM ecom_user WHERE id = $1",
+      [userId],
+    );
+    if (user.rows.length === 0)
+      return res.status(404).json({ status: false, error: "User not found" });
+
+    const isMatch = await bcrypt.compare(
+      currentPassword,
+      user.rows[0].password,
+    );
+    if (!isMatch)
+      return res
+        .status(400)
+        .json({ status: false, error: "Invalid current password" });
+
+    const newHash = await bcrypt.hash(newPassword, 10);
+    await db.query("UPDATE ecom_user SET password = $1 WHERE id = $2", [
+      newHash,
+      userId,
+    ]);
+
+    res.json({ status: true, message: "Password changed successfully" });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ status: false, error: "Server error" });
+  }
+};

@@ -341,13 +341,22 @@ exports.replyToTicket = async (req, res) => {
   const repliedByType = req.user.type || "USER"; // USER/STAFF
 
   try {
-    const ticketQuery = `SELECT id FROM tickets WHERE case_id = $1`;
+    const ticketQuery = `SELECT id, status FROM tickets WHERE case_id = $1`;
     const ticketResult = await pool.query(ticketQuery, [caseId]);
 
     if (ticketResult.rows.length === 0) {
       return res
         .status(404)
         .json({ success: false, error: "Ticket not found" });
+    }
+
+    if (
+      ticketResult.rows[0].status === "RESOLVED" ||
+      ticketResult.rows[0].status === "CLOSED"
+    ) {
+      return res
+        .status(404)
+        .json({ success: false, error: "Ticket has been closed or resolved." });
     }
 
     const query = `

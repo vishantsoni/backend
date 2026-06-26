@@ -1365,6 +1365,22 @@ exports.updateOrderStatus = async (req, res) => {
         .json({ success: false, message: "Invalid status" });
     }
 
+    const role = req.user.role;
+
+    if (role !== "Super Admin") {
+      // checking this order is his
+      const checkRes = await db.query(
+        `SELECT * FROM orders 
+          WHERE order_for LIKE 'distributor_%' 
+          AND distributor_id = $1 AND order_id = $2`,
+        [req.user.id, id],
+      );
+
+      if (checkRes.rows.length === 0) {
+        return res.json({ success: false, message: "Access Denied" });
+      }
+    }
+
     let query = `UPDATE orders SET order_status = $1, updated_at = CURRENT_TIMESTAMP WHERE order_id = $2 RETURNING *`;
     // let query = `UPDATE orders SET updated_at = CURRENT_TIMESTAMP WHERE order_id = $1 RETURNING *`;
 

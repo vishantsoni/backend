@@ -42,6 +42,8 @@ async function getOrCreateCommissionTdsBillPdf({
   cusInfo = {},
   force = false,
 }) {
+  // console.log("checking - ", tdsSummary, commissionSummary);
+
   const appUrl = process.env.APP_URL || "";
 
   const u = safeSegment(userId || "guest");
@@ -208,13 +210,8 @@ async function getOrCreateCommissionTdsBillPdf({
   drawLine(310, metaY, 310, metaY - 45, 0.5);
 
   drawText("Sakhi Distributor ID No.:", 35, metaY - 12, 8, true);
-  drawText(userId, 170, metaY - 12, 8, true);
+  drawText(cusInfo.referral_code, 170, metaY - 12, 8, true);
   drawLine(30, metaY - 17, 310, metaY - 17, 0.5);
-
-  // drawText("Order No:", 35, metaY - 28, 8, true);
-  // drawLine(30, metaY - 32, 310, metaY - 32, 0.5);
-
-  // drawText("Receipt No:", 35, metaY - 42, 8, true);
 
   // Right Side Dates
   drawText("From Date:", 315, metaY - 12, 8, true);
@@ -264,11 +261,9 @@ async function getOrCreateCommissionTdsBillPdf({
   let addrLabelOffset = metaY - 26;
 
   for (let idx = 0; idx < addressLabels.length; idx++) {
-    // Left block (Residential) label + value
     drawText(addressLabels[idx], 35, addrLabelOffset, 8);
     drawText(addressValues[idx], 170, addrLabelOffset, 8);
 
-    // Right block (Bill/Shipping) label + value (same cusInfo for now)
     drawText(addressLabels[idx], 305, addrLabelOffset, 8);
     drawText(addressValues[idx], 440, addrLabelOffset, 8);
 
@@ -291,7 +286,7 @@ async function getOrCreateCommissionTdsBillPdf({
   drawText("Transaction Summary", 240, tableY + 4, 10, true, brandColor);
   drawLine(30, tableY, 565, tableY, 0.5);
 
-  const colCoordinates = [30, 75, 185, 335, 565]; // Precise vertical column margins
+  const colCoordinates = [30, 75, 185, 335, 565];
 
   drawText("S. No.", 35, tableY - 14, 8, true);
   drawText("Date", 115, tableY - 14, 8, true);
@@ -304,14 +299,17 @@ async function getOrCreateCommissionTdsBillPdf({
   let totalCommissionAccumulated = Number(commissionSummary?.total_amount ?? 0);
   let totalTdsDeductedAccumulated = Number(tdsSummary?.total_amount ?? 0);
 
-  // Fallback programmatic summation mapping loops if aggregate totals arrays require client verification
+  const finalAmount = Number(
+    totalCommissionAccumulated - totalTdsDeductedAccumulated,
+  );
+
   if (commissionTransactions.length > 0 && totalCommissionAccumulated === 0) {
     commissionTransactions.forEach(
       (t) => (totalCommissionAccumulated += Number(t.amount || 0)),
     );
   }
 
-  const renderedRows = commissionTransactions.slice(0, 7); // Prevent viewport bounding overflow breaks
+  const renderedRows = commissionTransactions.slice(0, 7);
 
   renderedRows.forEach((item, index) => {
     drawText(String(index + 1), 45, tableY - 14, 8);
@@ -334,12 +332,12 @@ async function getOrCreateCommissionTdsBillPdf({
     drawLine(30, tableY, 565, tableY, 0.25, rgb(0.8, 0.8, 0.8));
   });
 
-  // Structural column grid boundaries lines mapping execution
+  // Vertical Columns Dynamic Boundaries Drawing
   colCoordinates.forEach((xPos) => {
     drawLine(xPos, metaY - 15, xPos, tableY, 0.5);
   });
 
-  // Grand Total Accumulative Row
+  // --- 1. Grand Total Row ---
   drawText("Grand Total", 95, tableY - 14, 8, true);
   drawText(
     "₹ " + totalCommissionAccumulated.toFixed(2),
@@ -354,41 +352,54 @@ async function getOrCreateCommissionTdsBillPdf({
   drawLine(30, tableY + 18, 30, tableY, 0.5);
   drawLine(565, tableY + 18, 565, tableY, 0.5);
 
-  // --- FINAL TALLY & STATEMENTS SUMMARY SECTION ---
-  drawLine(255, tableY, 255, tableY - 32, 0.5);
-  drawLine(385, tableY, 385, tableY - 32, 0.5);
-  drawLine(515, tableY, 515, tableY - 32, 0.5);
-
-  drawText("Invoice Value (In Words)", 35, tableY - 18, 8, true);
-
-  drawText("Total", 262, tableY - 10, 8, true);
-  drawText("Commission", 262, tableY - 22, 8, true);
-  drawText(
-    "₹ " + totalCommissionAccumulated.toFixed(2),
-    392,
-    tableY - 18,
-    8,
-    true,
-  );
-
-  drawText("Total TDS", 520, tableY - 10, 7.5, true);
-  drawText("amount", 520, tableY - 22, 7.5, true);
-
-  tableY -= 32;
-  drawLine(30, tableY, 565, tableY, 0.5);
-
-  // Draw bottom right localized aggregate cell for precise layout symmetry mapping
-  drawLine(385, tableY, 385, tableY - 18, 0.5);
-  drawLine(515, tableY, 515, tableY - 18, 0.5);
+  // --- 2. TDS (2%) Row ---
+  drawText("TDS (2%)", 95, tableY - 14, 8, true);
   drawText(
     "₹ " + totalTdsDeductedAccumulated.toFixed(2),
-    520,
-    tableY - 13,
+    215,
+    tableY - 14,
     8,
     true,
   );
 
   tableY -= 18;
+  drawLine(30, tableY, 565, tableY, 0.5);
+  drawLine(30, tableY + 18, 30, tableY, 0.5);
+  drawLine(565, tableY + 18, 565, tableY, 0.5);
+
+  // --- 3. FINAL TALLY & STATEMENTS SUMMARY SECTION (Invoice Value Box) ---
+  drawLine(255, tableY, 255, tableY - 32, 0.5);
+  drawLine(385, tableY, 385, tableY - 32, 0.5);
+  // drawLine(515, tableY, 515, tableY - 32, 0.5);
+  // drawLine(30, tableY + 32, 30, tableY - 32, 0.5); // Outer bounding sync links
+  // drawLine(565, tableY + 32, 565, tableY - 32, 0.5);
+
+  drawText("Invoice Value (In Words)", 35, tableY - 18, 8, true);
+
+  drawText("Total Commission", 262, tableY - 18, 8, true);
+  // drawText("", 262, tableY - 22, 8, true);
+  drawText("₹ " + finalAmount.toFixed(2), 392, tableY - 18, 8, true);
+
+  // drawText("Total TDS", 520, tableY - 18, 7.5, true);
+
+  // tableY -= 32;
+  // drawLine(30, tableY, 565, tableY, 0.5);
+
+  // Bottom localized total cell boundaries layout
+  // drawLine(385, tableY, 385, tableY - 18, 0.5);
+  // drawLine(515, tableY, 515, tableY - 18, 0.5);
+  // drawLine(30, tableY, 30, tableY - 18, 0.5);
+  // drawLine(565, tableY, 565, tableY - 18, 0.5);
+
+  // drawText(
+  //   "₹ " + totalTdsDeductedAccumulated.toFixed(2),
+  //   520,
+  //   tableY - 13,
+  //   8,
+  //   true,
+  // );
+
+  tableY -= 32;
   drawLine(30, tableY, 565, tableY, 0.5);
 
   // --- TERMS, COMPLIANCE & LEGAL DISCLAIMER ---
@@ -436,7 +447,7 @@ async function getOrCreateCommissionTdsBillPdf({
     disclaimerOffset -= 9;
   });
 
-  // --- FOOTER NOTIFICATION DIALOG DIALOG CONTAINER ---
+  // --- FOOTER NOTIFICATION DIALOG ---
   drawRect(40, 50, 515, 26, 0.5);
   drawText(
     "Note: Please save/print this receipt for future reference. For assistance under the Feel Safe Sakhi Yojana, visit feelsafeco.in",
