@@ -259,11 +259,19 @@ exports.getProductsForDistributor = async (req, res) => {
     const values = [];
 
     // Handling Status Filter
-    if (status !== "all") {
-      values.push(status);
-      whereClause += ` AND p.status = $${values.length}`;
-    } else {
-      whereClause += " AND p.status IN ('active', 'inactive', 'trash')";
+    // if (status !== "all") {
+    //   values.push(status);
+    //   whereClause += ` AND p.status = $${values.length}`;
+    // } else {
+    //   whereClause += " AND p.status IN ('active', 'inactive', 'trash')";
+    // }
+    if (status) {
+      if (status === "all") {
+        whereClause += " AND p.status IN ('active')";
+      } else {
+        whereClause += ` AND p.status = $${values.length + 1}`;
+        values.push(status);
+      }
     }
 
     const query = `

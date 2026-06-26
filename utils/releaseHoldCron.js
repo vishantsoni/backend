@@ -1,27 +1,134 @@
-const cron = require('node-cron');
-const db = require('../config/db');
+const cron = require("node-cron");
+const db = require("../config/db");
+const LevelCommissionDistribution = require("../services/commission/LevelCommission");
 
 // Daily cron to release 30-day hold commissions to total_balance
 async function releaseHeldCommissions() {
-  const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
-  
-  const pendingWallets = await db.query(`
-    UPDATE wallets 
-    SET 
-      total_amount = total_amount + pending_amount,
-      pending_amount = 0,
-      updated_at = CURRENT_TIMESTAMP
-    WHERE pending_amount > 0
-    RETURNING user_id, pending_amount
-  `);
-  
-  if (pendingWallets.rows.length > 0) {
-    console.log(`Released hold for ${pendingWallets.rows.length} users:`, pendingWallets.rows);
-    // Optional: Log as credit txn with category 'commission_release'
+  console.log(" ----- Cron Job Started -----");
+
+  // Client ko loop ke bahar declare kiya taaki finally block me access ho sake
+  let client;
+
+  try {
+    client = await db.connect();
+
+    // 1. Fetching pending transactions (Using LIKE with '%' to handle string splitting safely)
+    const query = `
+      SELECT id, user_id, amount, remarks 
+      FROM transactions 
+      WHERE status = 'pending' 
+        AND remarks LIKE 'Self purchase cashback%' 
+        AND created_at <= NOW() - INTERVAL '5 min';
+    `;
+
+    const TransRes = await client.query(query);
+
+    if (TransRes.rows.length === 0) {
+      console.log("No pending commissions found to release.");
+      return;
+    }
+
+    const allTransaction = TransRes.rows;
+    console.log(`Found ${allTransaction.length} transactions to process.`);
+
+    for (let tran of allTransaction) {
+      // Safe splitting for order_id
+      const remarkParts = tran.remarks.split(" | ");
+      const order_id = remarkParts[1];
+
+      if (!order_id) {
+        console.error(
+          `Skipping Transaction ID ${tran.id}: Order ID not found in remarks.`,
+        );
+        continue;
+      }
+
+      // Start a DB transaction for this specific order to ensure data safety
+      await client.query("BEGIN");
+
+      try {
+        // 2. Fetch order details along with missing fields (payment_method, razorpay_order_id)
+        const ord_query = `
+          SELECT sub_total, payment_method 
+          FROM orders 
+          WHERE order_id = $1 
+            AND order_status NOT IN ('cancelled', 'refunded', 'returned', 'return_requested')
+        `;
+        const ord_res = await client.query(ord_query, [order_id]);
+
+        if (ord_res.rows.length > 0) {
+          const { sub_total, payment_method } = ord_res.rows[0];
+          const tranAmount = parseFloat(tran.amount);
+
+          // 3. Update Transaction Status
+          await client.query(
+            `UPDATE transactions SET status = 'completed' WHERE id = $1`,
+            [tran.id],
+          );
+
+          // 4. FIXED: Update Wallet Amount for the SPECIFIC user_id
+          const pendingWallets = await client.query(
+            `
+            UPDATE wallets 
+            SET 
+              total_amount = total_amount + $1,
+              pending_amount = GREATEST(0, pending_amount - $1),
+              updated_at = CURRENT_TIMESTAMP
+            WHERE user_id = $2
+            RETURNING user_id, total_amount, pending_amount
+            `,
+            [tranAmount, tran.user_id],
+          );
+
+          // 5. Distribute Level Commission (Passing fetched order details)
+          await LevelCommissionDistribution(client, tran.user_id, {
+            amount: sub_total,
+            paymentMethod: payment_method || "N/A",
+            razorpay_order_id: "N/A",
+            order_id: order_id,
+          });
+
+          // Commit changes for this successful loop iteration
+          await client.query("COMMIT");
+
+          console.log(
+            `Successfully released commission for User ID: ${tran.user_id}, Txn ID: ${tran.id}`,
+          );
+        } else {
+          // If order is cancelled/refunded, you might want to fail/cancel this transaction
+          console.log(
+            `Order ${order_id} was cancelled/refunded. Skipping commission release.`,
+          );
+          await client.query("ROLLBACK");
+        }
+      } catch (loopError) {
+        // Agar kisi ek user ke process me error aaye, toh sirf uska ROLLBACK hoga, baaki chalte rahenge
+        await client.query("ROLLBACK");
+        console.error(`Error processing Transaction ID ${tran.id}:`, loopError);
+      }
+    }
+  } catch (error) {
+    console.error("Pending commission cron critical error: ", error);
+  } finally {
+    if (client) {
+      client.release(); // 🔥 CRITICAL: Connection wapas pool me bhej diya
+      console.log(" ----- DB Client Released -----");
+    }
+    console.log(" ----- Cron Job Finished -----");
   }
 }
 
 // Run daily at midnight
-cron.schedule('0 0 * * *', releaseHeldCommissions);
+// cron.schedule("0 0 * * *", releaseHeldCommissions);
+cron.schedule("* * * * *", releaseHeldCommissions);
 
-console.log('Hold release cron scheduled daily at midnight');
+console.log(
+  "\n\n ======  Hold release cron scheduled daily at midnight  ======= ",
+);
+
+// const commResult = await SelfCommission(client, userId, {
+//   amount: subTotal,
+//   paymentMethod: payment_method,
+//   razorpay_order_id,
+//   order_id: orderId,
+// });
