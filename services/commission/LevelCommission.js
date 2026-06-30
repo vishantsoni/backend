@@ -110,7 +110,7 @@ const LevelCommissionDistribution = async (client, userId, body) => {
                 upline.id,
                 commissionAmount,
                 userId,
-                `Pair Match: Order ${matchedOrder.order_id} & Current Order`,
+                `Pair Match: Order ${matchedOrder.order_id} & ${order_id}`,
               ],
             );
           }

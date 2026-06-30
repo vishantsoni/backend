@@ -86,7 +86,19 @@ exports.d_p_o = async (req, res) => {
     let taxAmount = 0;
 
     for (const item of items) {
-      const { product_id, variant_id, qty, tax_data } = item;
+      const {
+        product_id,
+        variant_id,
+        qty,
+        tax_data,
+        hsn_code,
+        dimension_unit,
+        dimension_width,
+        dimension_height,
+        dimension_length,
+      } = item;
+
+      console.log("\n\n --- item of placing - ", item);
 
       let productData;
       let taxRate = 0;
@@ -154,11 +166,6 @@ exports.d_p_o = async (req, res) => {
         );
       }
 
-      // Check Stock
-      // if (productData.stock && productData.stock < qty) {
-      //   throw new Error(`Insufficient stock for ${productData.product_name}`);
-      // }
-
       taxRate = parseFloat(productData.tax_rate);
       const itemTotal = parseFloat(productData.price) * qty;
       const itemBV = (productData.bv_point || 0) * qty;
@@ -174,6 +181,11 @@ exports.d_p_o = async (req, res) => {
           bv_point: productData.bv_point,
           tax_data: tax_data,
           attributes: productData.attributes || [],
+          hsn_code,
+          dimension_unit,
+          dimension_width,
+          dimension_height,
+          dimension_length,
         },
         qty,
         unit_price: productData.price,
@@ -190,7 +202,8 @@ exports.d_p_o = async (req, res) => {
     // 2. Tax (simple 18% GST for now, link to tax_settings later)
 
     // 3. Shipping (flat 50 for now)
-    const shippingCharges = await getShippingCharge(client);
+    // const shippingCharges = await getShippingCharge(client);
+    const shippingCharges = 0;
 
     // 4. Coupon discount (if provided)
     let discount = 0;

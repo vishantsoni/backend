@@ -1,7 +1,7 @@
 const fs = require("fs/promises");
 const path = require("path");
 const { PDFDocument, rgb, StandardFonts } = require("pdf-lib");
-
+const { ToWords } = require("to-words");
 // Polyfill required by @pdf-lib/fontkit UMD build in some Node setups
 // (fixes: ReferenceError: regeneratorRuntime is not defined)
 require("regenerator-runtime/runtime");
@@ -14,6 +14,39 @@ function safeSegment(input) {
   return str.replace(/[^a-zA-Z0-9_-]+/g, "_").slice(0, 120);
 }
 
+// 2. Initialize it with Indian Locale configuration
+const toWords = new ToWords({
+  localeCode: "en-IN",
+  converterOptions: {
+    currency: true,
+    ignoreDecimal: false,
+    ignoreZeroCurrency: false,
+    doNotAddOnly: false,
+    currencyOptions: {
+      // Overrides default "Rupee" to "RUPEES"
+      name: "Rupee",
+      plural: "Rupees",
+      symbol: "₹",
+      fractionalUnit: {
+        name: "Paisa",
+        plural: "Paisa",
+        symbol: "",
+      },
+    },
+  },
+});
+
+// Custom Helper to transform amount to Indian Currency English words format
+// 3. Updated clean wrapper function
+function convertAmountToWords(amount) {
+  try {
+    // toWords.convert(100268.00) outputs: "One Lakh Two Hundred Sixty Eight Rupees Only"
+    return toWords.convert(Number(amount)).toUpperCase();
+  } catch (e) {
+    console.error("Error converting number to words:", e);
+    return "N/A";
+  }
+}
 async function ensureDir(dirPath) {
   await fs.mkdir(dirPath, { recursive: true });
 }
@@ -232,7 +265,7 @@ async function getOrCreateInvoicePdf({ order, force = false }) {
 
   drawText("CIN- U13996DL2026PTC465812", 440, 733, 8, true);
   drawText("TAX INVOICE", 255, 725, 12, true, rgb(0.42, 0.16, 0.54));
-  drawText("GSTIN:- 07AAHCF0020FIZA", 442, 721, 8, true);
+  drawText("GSTIN:- 07AAHCF0020FIZA", 440, 721, 8, true);
 
   // --- METADATA SECTION ---
   let metaY = 712;
@@ -465,7 +498,17 @@ async function getOrCreateInvoicePdf({ order, force = false }) {
 
   drawLine(340, tableY, 340, tableY - 20, 0.5);
   drawLine(515, tableY, 515, tableY - 20, 0.5);
-  drawText("Invoice Value (In Words)", 35, tableY - 14, 8, true);
+  drawText("Invoice Value (In Words)", 35, tableY - 10, 8, true);
+
+  const wordsText = convertAmountToWords(totalGrandAmount);
+  // Wrap text neatly if it gets too long for the structural grid boundary (max 300px wide)
+  if (wordsText.length > 55) {
+    drawText(wordsText.slice(0, 55), 35, tableY - 16, 6.5, false);
+    // extend down slightly if a wrap occurs
+  } else {
+    drawText(wordsText, 35, tableY - 17, 6.5, false, rgb(0.3, 0.3, 0.3));
+  }
+
   drawText("Invoice Total", 345, tableY - 14, 8, true);
   drawText(totalGrandAmount.toFixed(2), 520, tableY - 14, 8, true);
 
@@ -558,6 +601,8 @@ async function getOrCreateInvoicePdf({ order, force = false }) {
   ];
 
   let discY = tableY - 12;
+  drawText("Terms Condition", 35, discY, 9, true);
+  discY = discY - 10;
   disclaimers.forEach((line) => {
     if (line.length > 130) {
       drawText(

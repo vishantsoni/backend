@@ -4,6 +4,25 @@ const crypto = require("crypto");
 const fs = require("fs/promises");
 const pathModule = require("path");
 const otpService = require("../utils/otpService");
+
+exports.getAllUsers = async (req, res) => {
+  try {
+    // We get the logged-in user's path from the request (sent by middleware)
+    // const userPath = req.user.node_path;
+
+    // Query: Find everyone whose path starts with the current user's path
+    // The <@ operator in ltree means "is a descendant of"
+    const downline = await db.query(
+      "SELECT id, username, role, node_path, full_name, referrer_id FROM users",
+    );
+
+    res.json({ status: true, data: downline.rows });
+  } catch (err) {
+    console.log("error all user - ", err);
+
+    res.status(500).send("Server Error");
+  }
+};
 exports.getDownline = async (req, res) => {
   try {
     // We get the logged-in user's path from the request (sent by middleware)

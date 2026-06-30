@@ -542,7 +542,7 @@ exports.getGSTReport = async (req, res) => {
         COALESCE(SUM(o.total_amount), 0)::numeric(12,2) as total_amount,
         COALESCE(AVG(o.tax_amount), 0)::numeric(12,2) as avg_gst_per_order
       FROM orders o
-      WHERE o.payment_status = 'paid'
+      WHERE o.payment_status = 'paid' AND o.order_status = 'delivered'
       ${dateClause} ${roleClause}
     `;
     const summaryResult = await db.query(summaryQuery, queryParams);
@@ -558,7 +558,7 @@ exports.getGSTReport = async (req, res) => {
       JOIN order_items oi ON o.id = oi.order_id
       LEFT JOIN products p ON oi.product_id = p.id
       LEFT JOIN tax_settings ts ON p.tax_id = ts.id
-      WHERE o.payment_status = 'paid'
+      WHERE o.payment_status = 'paid' AND o.order_status = 'delivered'
       ${dateClause} ${roleClause}
       GROUP BY ts.tax_percentage
       ORDER BY tax_rate DESC
@@ -574,7 +574,7 @@ exports.getGSTReport = async (req, res) => {
         COALESCE(SUM(o.tax_amount), 0)::numeric(12,2) as gst_collected,
         COALESCE(SUM(o.total_amount), 0)::numeric(12,2) as total_amount
       FROM orders o
-      WHERE o.payment_status = 'paid'
+      WHERE o.payment_status = 'paid' AND o.order_status = 'delivered'
       ${dateClause} ${roleClause}
       GROUP BY DATE_TRUNC('month', o.created_at)
       ORDER BY month DESC
@@ -598,7 +598,7 @@ exports.getGSTReport = async (req, res) => {
       FROM orders o
       LEFT JOIN ecom_user u ON o.user_id = u.id
       LEFT JOIN users d ON o.distributor_id = d.id
-      WHERE o.payment_status = 'paid'
+      WHERE o.payment_status = 'paid' AND o.order_status = 'delivered'
       ${dateClause} ${roleClause}
       ORDER BY o.tax_amount DESC
       LIMIT 20
@@ -637,7 +637,7 @@ exports.getGSTReport = async (req, res) => {
         COALESCE(SUM(o.tax_amount), 0)::numeric(12,2) as gst_amount,
         COALESCE(SUM(o.total_amount), 0)::numeric(12,2) as total_amount
       FROM orders o
-      WHERE o.payment_status = 'paid'
+      WHERE o.payment_status = 'paid' AND o.order_status = 'delivered'
       ${dateClause} ${roleClause}
       GROUP BY
         CASE
@@ -690,7 +690,7 @@ exports.getGSTReport = async (req, res) => {
         )::numeric(12,2) as igst
 
       FROM orders o
-      WHERE o.payment_status = 'paid'
+      WHERE o.payment_status = 'paid' AND o.order_status = 'delivered'
       ${dateClause} ${roleClause}
     `;
     const gstSplitResult = await db.query(gstSplitQuery, queryParams);
@@ -717,6 +717,134 @@ exports.getGSTReport = async (req, res) => {
 
 const ExcelJS = require("exceljs");
 
+// exports.exportGSTReportExcel = async (req, res) => {
+//   console.log("\n ============= GTS EXCEL EXPORTING ==========");
+//   try {
+//     const { from, to } = req.query;
+//     const { id: userId, role } = req.user;
+
+//     const { clause: dateClause, params: dateParams } = buildDateRange(
+//       from,
+//       to,
+//       "o",
+//     );
+
+//     let roleClause = "";
+//     let roleParams = [];
+
+//     // Match GST queries behavior: non-super-admin should export only their own distributor orders
+//     if (role !== "super_admin" && role !== "Super Admin") {
+//       roleClause = ` AND o.distributor_id = $${dateParams.length + 1}`;
+//       roleParams = [userId];
+//     }
+
+//     const queryParams = [...dateParams, ...roleParams];
+
+//     // 1. डेटा फेच करें (सिर्फ मुख्य डेटा ले रहे हैं एक्सेल के लिए)
+//     const reportQuery = `
+//       SELECT
+//         o.order_id,
+//         o.created_at,
+//         COALESCE(u.name, d.full_name, d.username) as customer_name,
+//         CASE WHEN o.order_for LIKE 'distributor_%' THEN 'B2B' ELSE 'B2C' END as type,
+//         o.sub_total::numeric(12,2) as taxable_value,
+//         o.tax_amount::numeric(12,2) as gst_amount,
+
+//         /* GST split mapped exactly same as getGSTReport */
+//         COALESCE(
+//           CASE
+//             WHEN COALESCE((o.shipping_address::jsonb ->> 'state'), '') = 'Delhi' THEN (o.tax_amount / 2)
+//             ELSE 0
+//           END,
+//           0
+//         )::numeric(12,2) as cgst,
+
+//         COALESCE(
+//           CASE
+//             WHEN COALESCE((o.shipping_address::jsonb ->> 'state'), '') = 'Delhi' THEN (o.tax_amount / 2)
+//             ELSE 0
+//           END,
+//           0
+//         )::numeric(12,2) as sgst,
+
+//         COALESCE(
+//           CASE
+//             WHEN COALESCE((o.shipping_address::jsonb ->> 'state'), '') != 'Delhi' THEN o.tax_amount
+//             ELSE 0
+//           END,
+//           0
+//         )::numeric(12,2) as igst,
+
+//         o.total_amount::numeric(12,2) as total,
+//         o.order_status
+//       FROM orders o
+//       LEFT JOIN ecom_user u ON o.user_id = u.id
+//       LEFT JOIN users d ON o.distributor_id = d.id
+//       WHERE o.payment_status = 'paid' AND o.order_status = 'delivered'
+//       ${dateClause}
+//       ${roleClause}
+//       ORDER BY o.created_at DESC
+//     `;
+//     const result = await db.query(reportQuery, queryParams);
+
+//     // 2. Excel Workbook और Worksheet बनाएं
+//     const workbook = new ExcelJS.Workbook();
+//     const worksheet = workbook.addWorksheet("GST Sales Report");
+
+//     // 3. Columns सेट करें
+//     worksheet.columns = [
+//       { header: "Order ID", key: "order_id", width: 20 },
+//       { header: "Date", key: "created_at", width: 15 },
+//       { header: "Customer", key: "customer_name", width: 25 },
+//       { header: "Type", key: "type", width: 10 },
+//       { header: "Order Status", key: "order_status", width: 15 },
+//       { header: "Taxable Value (₹)", key: "taxable_value", width: 15 },
+//       { header: "CGST (₹)", key: "cgst", width: 12 },
+//       { header: "SGST (₹)", key: "sgst", width: 12 },
+//       { header: "IGST (₹)", key: "igst", width: 12 },
+//       { header: "Total GST (₹)", key: "gst_amount", width: 15 },
+//       { header: "Grand Total (₹)", key: "total", width: 15 },
+//     ];
+
+//     // 4. Header को बोल्ड और कलर्ड बनाएं (Ganesh Tech Theme)
+//     worksheet.getRow(1).eachCell((cell) => {
+//       cell.font = { bold: true, color: { argb: "FFFFFF" } };
+//       cell.fill = {
+//         type: "pattern",
+//         pattern: "solid",
+//         fgColor: { argb: "E91E63" }, // आपकी थीम का पिंक/मजेंटा कलर
+//       };
+//     });
+
+//     // 5. डेटा रोज़ जोड़ें
+//     result.rows.forEach((row) => {
+//       worksheet.addRow({
+//         ...row,
+//         created_at: new Date(row.created_at).toLocaleDateString(),
+//       });
+//     });
+
+//     // 6. Response Headers सेट करें
+//     res.setHeader(
+//       "Content-Type",
+//       "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+//     );
+//     res.setHeader(
+//       "Content-Disposition",
+//       `attachment; filename=GST_Report.xlsx`,
+//     );
+
+//     // 7. फाइल भेजें
+//     await workbook.xlsx.write(res);
+//     return res.end();
+//   } catch (error) {
+//     console.error("Excel Export Error:", error);
+//     res.status(500).json({ success: false, message: "Export failed" });
+//   }
+// };
+
+// Helper to build date range clause
+
 exports.exportGSTReportExcel = async (req, res) => {
   console.log("\n ============= GTS EXCEL EXPORTING ==========");
   try {
@@ -740,49 +868,68 @@ exports.exportGSTReportExcel = async (req, res) => {
 
     const queryParams = [...dateParams, ...roleParams];
 
-    // 1. डेटा फेच करें (सिर्फ मुख्य डेटा ले रहे हैं एक्सेल के लिए)
+    // 1. डेटा फेच करें (JOINing order_items and extracting from JSONB)
     const reportQuery = `
       SELECT
         o.order_id,
         o.created_at,
         COALESCE(u.name, d.full_name, d.username) as customer_name,
         CASE WHEN o.order_for LIKE 'distributor_%' THEN 'B2B' ELSE 'B2C' END as type,
-        o.sub_total::numeric(12,2) as taxable_value,
-        o.tax_amount::numeric(12,2) as gst_amount,
+        o.order_status,
+        
+        /* Item Specific Details */
+        oi.product_name as product_name, -- Using variant_sku as item description identifier
+        oi.qty as quantity,
+        oi.unit_price::numeric(12,2) as item_price,
+        oi.total_item_price::numeric(12,2) as taxable_value,
+        COALESCE(oi.variant_details->>'hsn_code', '-') AS hsn_code,
 
-        /* GST split mapped exactly same as getGSTReport */
+        /* Calculate tax amount dynamically from JSONB percentage if available, otherwise default to 0 */
+        COALESCE(
+          (oi.total_item_price * COALESCE((oi.variant_details->'tax_data'->>'percentage')::numeric, 0) / 100), 
+          0
+        )::numeric(12,2) as gst_amount,
+
+        /* Dynamic CGST split */
         COALESCE(
           CASE
-            WHEN COALESCE((o.shipping_address::jsonb ->> 'state'), '') = 'Delhi' THEN (o.tax_amount / 2)
+            WHEN COALESCE((o.shipping_address::jsonb ->> 'state'), '') = 'Delhi' 
+            THEN ((oi.total_item_price * COALESCE((oi.variant_details->'tax_data'->>'percentage')::numeric, 0) / 100) / 2)
             ELSE 0
           END,
           0
         )::numeric(12,2) as cgst,
 
+        /* Dynamic SGST split */
         COALESCE(
           CASE
-            WHEN COALESCE((o.shipping_address::jsonb ->> 'state'), '') = 'Delhi' THEN (o.tax_amount / 2)
+            WHEN COALESCE((o.shipping_address::jsonb ->> 'state'), '') = 'Delhi' 
+            THEN ((oi.total_item_price * COALESCE((oi.variant_details->'tax_data'->>'percentage')::numeric, 0) / 100) / 2)
             ELSE 0
           END,
           0
         )::numeric(12,2) as sgst,
 
+        /* Dynamic IGST split */
         COALESCE(
           CASE
-            WHEN COALESCE((o.shipping_address::jsonb ->> 'state'), '') != 'Delhi' THEN o.tax_amount              
+            WHEN COALESCE((o.shipping_address::jsonb ->> 'state'), '') != 'Delhi' 
+            THEN (oi.total_item_price * COALESCE((oi.variant_details->'tax_data'->>'percentage')::numeric, 0) / 100)
             ELSE 0
           END,
           0
         )::numeric(12,2) as igst,
 
-        o.total_amount::numeric(12,2) as total
+        /* Total = Taxable Value + Computed GST Amount */
+        (oi.total_item_price + COALESCE((oi.total_item_price * COALESCE((oi.variant_details->'tax_data'->>'percentage')::numeric, 0) / 100), 0))::numeric(12,2) as total
       FROM orders o
+      INNER JOIN order_items oi ON o.id = oi.order_id   
       LEFT JOIN ecom_user u ON o.user_id = u.id
       LEFT JOIN users d ON o.distributor_id = d.id
-      WHERE o.payment_status = 'paid'
+      WHERE o.payment_status = 'paid' AND o.order_status = 'delivered'
       ${dateClause}
       ${roleClause}
-      ORDER BY o.created_at DESC
+      ORDER BY o.created_at DESC, o.order_id ASC
     `;
     const result = await db.query(reportQuery, queryParams);
 
@@ -796,6 +943,12 @@ exports.exportGSTReportExcel = async (req, res) => {
       { header: "Date", key: "created_at", width: 15 },
       { header: "Customer", key: "customer_name", width: 25 },
       { header: "Type", key: "type", width: 10 },
+      { header: "Order Status", key: "order_status", width: 15 },
+      { header: "Variant SKU", key: "product_name", width: 25 },
+      { header: "HSN Code", key: "hsn_code", width: 25 },
+
+      { header: "Qty", key: "quantity", width: 10 },
+      { header: "Unit Price (₹)", key: "item_price", width: 12 },
       { header: "Taxable Value (₹)", key: "taxable_value", width: 15 },
       { header: "CGST (₹)", key: "cgst", width: 12 },
       { header: "SGST (₹)", key: "sgst", width: 12 },
@@ -810,11 +963,11 @@ exports.exportGSTReportExcel = async (req, res) => {
       cell.fill = {
         type: "pattern",
         pattern: "solid",
-        fgColor: { argb: "E91E63" }, // आपकी थीम का पिंक/मजेंटा कलर
+        fgColor: { argb: "E91E63" },
       };
     });
 
-    // 5. डेटा रोज़ जोड़ें
+    // 5. डेटा रोज़ जोड़ें
     result.rows.forEach((row) => {
       worksheet.addRow({
         ...row,
@@ -841,11 +994,11 @@ exports.exportGSTReportExcel = async (req, res) => {
   }
 };
 
-// Helper to build date range clause
-
 exports.getDistributorSalesReport = async (req, res) => {
   try {
     const { from, to } = req.query;
+
+    const userid = req.user.id;
 
     const { clause: dateClause, params: dateParams } = buildDateRange(
       from,
@@ -854,8 +1007,9 @@ exports.getDistributorSalesReport = async (req, res) => {
     );
 
     // Distributor sales (B2B): orders placed for distributor flow
-    const buildDistributorClause = " AND o.order_for LIKE 'distributor_%'";
+    const buildDistributorClause = ` AND o.order_for LIKE 'distributor_${userid}'`;
 
+    // FIXED: Using a SAFE CASE statement with regular expressions to filter out string data logs from calculations
     const summaryQuery = `
       SELECT 
         COUNT(*)::int as total_orders,
@@ -863,27 +1017,35 @@ exports.getDistributorSalesReport = async (req, res) => {
         COALESCE(SUM(o.sub_total::numeric), 0)::numeric(12,2) as total_sub_total,
         COALESCE(SUM(o.tax_amount::numeric), 0)::numeric(12,2) as total_tax,
         COALESCE(SUM(o.shipping_charges::numeric), 0)::numeric(12,2) as total_shipping,
-        COALESCE(SUM(o.total_bv_points::int), 0)::int as total_bv_points,
+        COALESCE(
+          SUM(
+            CASE 
+              WHEN o.total_bv_points::text ~ '^[0-9]+$' THEN o.total_bv_points::int 
+              ELSE 0 
+            END
+          ), 
+          0
+        )::int as total_bv_points,
         COALESCE(AVG(o.total_amount), 0)::numeric(12,2) as avg_order_value
       FROM orders o
       WHERE 1=1
-      AND o.payment_status = 'paid'
+      AND o.order_status = 'delivered'
       ${buildDistributorClause}
-      ${from ? ` AND o.created_at >= $${dateParams.length + 1}` : ""}
-      ${to ? ` AND o.created_at::date = $${dateParams.length + 2}::date` : ""}
+      ${from ? ` AND o.created_at >= $1` : ""}
+      ${to ? ` AND o.created_at::date = $2::date` : ""}
     `;
 
     const statusQuery = `
       SELECT 
-        o.order_status,
+        o.order_status,        
         COUNT(*)::int as count,
         COALESCE(SUM(o.total_amount), 0)::numeric(12,2) as revenue
       FROM orders o
       WHERE 1=1
-      AND o.payment_status = 'paid'
+      AND o.order_status = 'delivered'
       ${buildDistributorClause}
-      ${from ? ` AND o.created_at >= '${from}'` : ""}
-      ${to ? ` AND o.created_at::date = '${to}'::date` : ""}
+      ${from ? ` AND o.created_at >= $1` : ""}
+      ${to ? ` AND o.created_at::date = $2::date` : ""}
       GROUP BY o.order_status
       ORDER BY count DESC
     `;
@@ -891,15 +1053,16 @@ exports.getDistributorSalesReport = async (req, res) => {
     const paymentStatusQuery = `
       SELECT 
         o.payment_status,
+        o.payment_method,
         COUNT(*)::int as count,
         COALESCE(SUM(o.total_amount), 0)::numeric(12,2) as revenue
       FROM orders o
       WHERE 1=1
-      AND o.payment_status = 'paid'
+      AND o.order_status = 'delivered'
       ${buildDistributorClause}
-      ${from ? ` AND o.created_at >= '${from}'` : ""}
-      ${to ? ` AND o.created_at::date = '${to}'::date` : ""}
-      GROUP BY o.payment_status
+      ${from ? ` AND o.created_at >= $1` : ""}
+      ${to ? ` AND o.created_at::date = $2::date` : ""}
+      GROUP BY o.payment_status, o.payment_method
       ORDER BY count DESC
     `;
 
@@ -908,14 +1071,12 @@ exports.getDistributorSalesReport = async (req, res) => {
         COALESCE(DATE(o.created_at), CURRENT_DATE) as date,
         COUNT(*)::int as orders,
         COALESCE(SUM(o.total_amount), 0)::numeric(12,2) as revenue
-        
       FROM orders o
-      LEFT JOIN order_items oi ON o.id = oi.order_id
       WHERE 1=1
-      AND o.payment_status = 'paid'
+      AND o.order_status = 'delivered'
       ${buildDistributorClause}
-      ${from ? ` AND o.created_at >= '${from}'` : ""}
-      ${to ? ` AND o.created_at::date = '${to}'::date` : ""}
+      ${from ? ` AND o.created_at >= $1` : ""}
+      ${to ? ` AND o.created_at::date = $2::date` : ""}
       GROUP BY DATE(o.created_at)
       ORDER BY date DESC
     `;
@@ -926,24 +1087,28 @@ exports.getDistributorSalesReport = async (req, res) => {
         oi.product_name,
         SUM(oi.qty)::int as total_qty_sold,
         COUNT(DISTINCT oi.order_id)::int as total_orders
-        
       FROM order_items oi
       JOIN orders o ON oi.order_id = o.id
       WHERE 1=1
-      AND o.payment_status = 'paid'
+      AND o.order_status = 'delivered'
       ${buildDistributorClause}
-      ${from ? ` AND o.created_at >= '${from}'` : ""}
-      ${to ? ` AND o.created_at::date = '${to}'::date` : ""}
+      ${from ? ` AND o.created_at >= $1` : ""}
+      ${to ? ` AND o.created_at::date = $2::date` : ""}
       GROUP BY oi.product_id, oi.product_name
       ORDER BY total_qty_sold DESC
       LIMIT 10
     `;
 
-    const summaryResult = await db.query(summaryQuery);
-    const statusResult = await db.query(statusQuery);
-    const paymentStatusResult = await db.query(paymentStatusQuery);
-    const salesTrendResult = await db.query(salesTrendQuery);
-    const topProductsResult = await db.query(topProductsQuery);
+    // Setup clear parameter arrays safely
+    const queryParams = [];
+    if (from) queryParams.push(from);
+    if (to) queryParams.push(to);
+
+    const summaryResult = await db.query(summaryQuery, queryParams);
+    const statusResult = await db.query(statusQuery, queryParams);
+    const paymentStatusResult = await db.query(paymentStatusQuery, queryParams);
+    const salesTrendResult = await db.query(salesTrendQuery, queryParams);
+    const topProductsResult = await db.query(topProductsQuery, queryParams);
 
     return res.json({
       success: true,
@@ -989,6 +1154,91 @@ exports.exportSalesReportExcel = async (req, res) => {
       LEFT JOIN ecom_user eu ON o.user_id = eu.id
       LEFT JOIN users u ON o.distributor_id = u.id
       WHERE o.payment_status = 'paid'
+      ${dateClause}
+      GROUP BY o.id, o.order_id, o.created_at, eu.name, u.full_name, u.username, type, o.order_status, o.payment_status, o.sub_total, o.tax_amount, o.shipping_charges, o.total_amount
+      ORDER BY o.created_at DESC
+    `;
+
+    const result = await db.query(reportQuery, dateParams);
+    const workbook = new ExcelJS.Workbook();
+    const worksheet = workbook.addWorksheet("Sales Report");
+
+    worksheet.columns = [
+      { header: "Order ID", key: "order_id", width: 20 },
+      { header: "Date", key: "created_at", width: 15 },
+      { header: "Customer", key: "customer_name", width: 25 },
+      { header: "Type", key: "type", width: 10 },
+      { header: "Order Status", key: "order_status", width: 15 },
+      { header: "Payment Status", key: "payment_status", width: 15 },
+      { header: "Sub Total (₹)", key: "sub_total", width: 15 },
+      { header: "Tax Amount (₹)", key: "tax_amount", width: 15 },
+      { header: "Shipping (₹)", key: "shipping_charges", width: 15 },
+      { header: "Total Amount (₹)", key: "total_amount", width: 18 },
+      { header: "BV Points", key: "bv_points", width: 10 },
+    ];
+
+    worksheet.getRow(1).eachCell((cell) => {
+      cell.font = { bold: true, color: { argb: "FFFFFF" } };
+      cell.fill = {
+        type: "pattern",
+        pattern: "solid",
+        fgColor: { argb: "4CAF50" },
+      };
+    });
+
+    result.rows.forEach((row) => {
+      worksheet.addRow({
+        ...row,
+        created_at: new Date(row.created_at).toLocaleDateString(),
+      });
+    });
+
+    res.setHeader(
+      "Content-Type",
+      "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    );
+    res.setHeader(
+      "Content-Disposition",
+      `attachment; filename=Sales_Report.xlsx`,
+    );
+    await workbook.xlsx.write(res);
+    res.end();
+  } catch (error) {
+    console.error("Excel Export Error (Sales):", error);
+    res.status(500).json({ success: false, message: "Export failed" });
+  }
+};
+
+exports.exportSales_D_ReportExcel = async (req, res) => {
+  try {
+    const { from, to } = req.query;
+
+    const userid = req.user.id;
+
+    const { clause: dateClause, params: dateParams } = buildDateRange(
+      from,
+      to,
+      "o",
+    );
+
+    const reportQuery = `
+      SELECT
+        o.order_id,
+        o.created_at,
+        COALESCE(eu.name, u.full_name, u.username) as customer_name,
+        CASE WHEN o.order_for LIKE 'distributor_%' THEN 'B2C' ELSE 'B2B' END as type,
+        o.order_status,
+        o.payment_status,
+        o.sub_total::numeric(12,2) as sub_total,
+        o.tax_amount::numeric(12,2) as tax_amount,
+        o.shipping_charges::numeric(12,2) as shipping_charges,
+        o.total_amount::numeric(12,2) as total_amount,
+        COALESCE(SUM(oi.total_item_bv), 0)::int as bv_points
+      FROM orders o
+      LEFT JOIN order_items oi ON o.id = oi.order_id
+      LEFT JOIN ecom_user eu ON o.user_id = eu.id
+      LEFT JOIN users u ON o.distributor_id = u.id
+      WHERE o.distributor_id = ${userid}
       ${dateClause}
       GROUP BY o.id, o.order_id, o.created_at, eu.name, u.full_name, u.username, type, o.order_status, o.payment_status, o.sub_total, o.tax_amount, o.shipping_charges, o.total_amount
       ORDER BY o.created_at DESC

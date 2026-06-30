@@ -211,6 +211,7 @@ exports.get_d_Cart = async (req, res) => {
       p.name AS product_name, 
       p.slug, 
       p.f_image,
+      p.hsn_code,
       COALESCE(pv.price, p.base_price) AS unit_price,
       ROUND(
           (COALESCE(pv.price, p.base_price) * COALESCE(t.tax_percentage, 0) / 100)::numeric, 

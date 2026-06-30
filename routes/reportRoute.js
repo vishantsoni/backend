@@ -8,6 +8,7 @@ const {
   getGSTReport,
   exportGSTReportExcel,
   exportSalesReportExcel,
+  exportSales_D_ReportExcel,
 } = require("../controllers/reportsController");
 
 const {
@@ -25,10 +26,6 @@ const isSuperAdmin = require("../middleware/isSuperAdmin");
 
 // @route   GET api/reports/sales
 router.get("/sales", authMiddleware, isSuperAdmin, getSalesReport);
-
-// @route   GET api/reports/distributor-sales
-router.get("/distributor-sales", authMiddleware, getDistributorSalesReport);
-
 // @route   GET api/reports/sales-excel
 router.get(
   "/sales-excel",
@@ -36,6 +33,10 @@ router.get(
   isSuperAdmin,
   exportSalesReportExcel,
 );
+
+// @route   GET api/reports/distributor-sales
+router.get("/distributor-sales", authMiddleware, getDistributorSalesReport);
+router.get("/sales-d-excel", authMiddleware, exportSales_D_ReportExcel);
 
 // @route   GET api/reports/profit-loss
 router.get("/profit-loss", authMiddleware, isSuperAdmin, getProfitLossReport);

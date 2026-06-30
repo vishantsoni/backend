@@ -59,9 +59,20 @@ CREATE TABLE IF NOT EXISTS products (
     subcategories INTEGER[],
     attributes INTEGER[],
     variants JSONB,
+
+    -- Shipping details
+    hsn_code VARCHAR(30),
+    weight NUMERIC(12,3),
+    -- Dimensions stored as separate fields (units are responsibility of frontend/backend)
+    dimension_length NUMERIC(12,3),
+    dimension_width NUMERIC(12,3),
+    dimension_height NUMERIC(12,3),
+    dimension_unit VARCHAR(20),
+
     status VARCHAR(20) DEFAULT 'active',
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 );
+
 
 CREATE TABLE IF NOT EXISTS attributes (
     id SERIAL PRIMARY KEY,

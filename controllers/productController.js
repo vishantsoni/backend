@@ -292,6 +292,13 @@ exports.getProductsForDistributor = async (req, res) => {
               (CASE WHEN p.discounted_price > 0 THEN p.discounted_price ELSE p.base_price END 
               * (1 + COALESCE(t.tax_percentage, 0) / 100))::numeric, 2
             ),
+          -- Shipping details
+          'hsn_code', p.hsn_code,
+          'weight', p.weight,
+          'dimension_length', p.dimension_length,
+          'dimension_width', p.dimension_width,
+          'dimension_height', p.dimension_height,
+          'dimension_unit', p.dimension_unit,
           'subcategories', p.subcategories,
           'attributes', p.attributes,
           'status', p.status,
@@ -404,6 +411,12 @@ exports.createProduct = async (req, res) => {
       cat_id,
       status,
       tax_id,
+      hsn_code,
+      weight,
+      dimension_length,
+      dimension_width,
+      dimension_height,
+      dimension_unit,
       variants: variantsStr,
     } = req.body;
 
@@ -462,8 +475,10 @@ exports.createProduct = async (req, res) => {
     const basePrice = parseFloat(price) || 0;
     const b_discounted_price = parseFloat(discounted_price) || 0;
     const result = await db.query(
-      `INSERT INTO products (cat_id, name, description, short_desc, f_image, g_image, status, tax_id, base_price, subcategories, attributes, discounted_price, slug) 
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13) RETURNING *`,
+      `INSERT INTO products (cat_id, name, description, short_desc, f_image, g_image, status, tax_id, base_price, subcategories, attributes, discounted_price, slug,
+        hsn_code, weight, dimension_length, dimension_width, dimension_height, dimension_unit)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13,
+        $14, $15, $16, $17, $18, $19) RETURNING *`,
       [
         cat_id || null,
         name.trim(),
@@ -478,8 +493,29 @@ exports.createProduct = async (req, res) => {
         attributes,
         b_discounted_price,
         slug,
+        hsn_code || null,
+        weight !== undefined && weight !== null && weight !== ""
+          ? parseFloat(weight)
+          : null,
+        dimension_length !== undefined &&
+        dimension_length !== null &&
+        dimension_length !== ""
+          ? parseFloat(dimension_length)
+          : null,
+        dimension_width !== undefined &&
+        dimension_width !== null &&
+        dimension_width !== ""
+          ? parseFloat(dimension_width)
+          : null,
+        dimension_height !== undefined &&
+        dimension_height !== null &&
+        dimension_height !== ""
+          ? parseFloat(dimension_height)
+          : null,
+        dimension_unit || null,
       ],
     );
+
     const product = result.rows[0];
 
     // Insert variants and mappings
@@ -987,6 +1023,12 @@ exports.getProductByslug = async (req, res) => {
           'discounted_price', ROUND(COALESCE(p.discounted_price, p.base_price) * (1 + COALESCE(t.tax_percentage, 0) / 100.0), 2),
           'status', p.status,
           'created_at', p.created_at,
+          'hsn_code', p.hsn_code,
+          'weight', p.weight,
+          'dimension_length', p.dimension_length,
+          'dimension_width', p.dimension_width,
+          'dimension_height', p.dimension_height,
+          'dimension_unit', p.dimension_unit,
           
           -- New Stock Logic for Main Product
           'admin_stock', COALESCE((
@@ -1122,7 +1164,14 @@ exports.updateProduct = async (req, res) => {
       status,
       tax_id,
       slug,
+      hsn_code,
+      weight,
+      dimension_length,
+      dimension_width,
+      dimension_height,
+      dimension_unit,
     } = req.body;
+
     // console.log("g-image - ", req.body);
     // console.log("g-image - ", req.files);
 
@@ -1202,6 +1251,54 @@ exports.updateProduct = async (req, res) => {
     if (tax_id !== undefined) {
       updates.push(`tax_id = $${paramIndex}`);
       values.push(tax_id || null);
+      paramIndex++;
+    }
+
+    if (hsn_code !== undefined) {
+      updates.push(`hsn_code = $${paramIndex}`);
+      values.push(hsn_code || null);
+      paramIndex++;
+    }
+
+    if (weight !== undefined) {
+      updates.push(`weight = $${paramIndex}`);
+      values.push(weight !== null && weight !== "" ? parseFloat(weight) : null);
+      paramIndex++;
+    }
+
+    if (dimension_length !== undefined) {
+      updates.push(`dimension_length = $${paramIndex}`);
+      values.push(
+        dimension_length !== null && dimension_length !== ""
+          ? parseFloat(dimension_length)
+          : null,
+      );
+      paramIndex++;
+    }
+
+    if (dimension_width !== undefined) {
+      updates.push(`dimension_width = $${paramIndex}`);
+      values.push(
+        dimension_width !== null && dimension_width !== ""
+          ? parseFloat(dimension_width)
+          : null,
+      );
+      paramIndex++;
+    }
+
+    if (dimension_height !== undefined) {
+      updates.push(`dimension_height = $${paramIndex}`);
+      values.push(
+        dimension_height !== null && dimension_height !== ""
+          ? parseFloat(dimension_height)
+          : null,
+      );
+      paramIndex++;
+    }
+
+    if (dimension_unit !== undefined) {
+      updates.push(`dimension_unit = $${paramIndex}`);
+      values.push(dimension_unit || null);
       paramIndex++;
     }
 

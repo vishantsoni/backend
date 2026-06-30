@@ -11,6 +11,7 @@ const {
 } = require("../controllers/kycRequestController");
 const authMiddleware = require("../middleware/authMiddleware");
 
+router.get("/all", [auth, isSuperAdmin], userController.getAllUsers);
 router.get("/downline", auth, userController.getMyDownline);
 router.put("/downline/:id", [auth, isSuperAdmin], userController.updateMember);
 router.get("/tree", auth, userController.getMyTree);

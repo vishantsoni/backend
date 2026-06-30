@@ -102,15 +102,35 @@ exports.getUserDashboardData = async (req, res) => {
     );
 
     // ─── 6. TEAM / DOWNLINE MEMBERS ───
+    // const teamStats = await safeQuery(
+    //   `
+    //   SELECT
+    //     COUNT(*)::int as total_team_members,
+    //     COUNT(*) FILTER (WHERE nlevel(binary_path) = 2)::int as direct_referrals,
+    //     COUNT(*) FILTER (WHERE nlevel(binary_path) > 2)::int as downline_members
+    //   FROM users
+    //   WHERE binary_path @> (SELECT binary_path FROM users WHERE id = $1)
+    //     AND id != $1
+    //   `,
+    //   [userId],
+    //   {},
+    // );
+
     const teamStats = await safeQuery(
       `
+      WITH target_user AS (    
+        SELECT node_path, nlevel(node_path) AS target_level 
+        FROM users 
+        WHERE id = 134
+      )
       SELECT 
         COUNT(*)::int as total_team_members,
-        COUNT(*) FILTER (WHERE nlevel(binary_path) = 2)::int as direct_referrals,
-        COUNT(*) FILTER (WHERE nlevel(binary_path) > 2)::int as downline_members
-      FROM users
-      WHERE binary_path @> (SELECT binary_path FROM users WHERE id = $1)
-        AND id != $1
+        COUNT(*) FILTER (WHERE nlevel(u.node_path) = t.target_level + 1)::int as direct_referrals,
+        COUNT(*) FILTER (WHERE nlevel(u.node_path) > t.target_level + 1)::int as downline_members
+      FROM users u
+      CROSS JOIN target_user t
+      WHERE u.node_path <@ t.node_path
+        AND u.id != $1;
       `,
       [userId],
       {},
