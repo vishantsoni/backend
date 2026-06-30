@@ -164,6 +164,11 @@ exports.getProducts = async (req, res) => {
         c.name as category_name,        
         COUNT(v.id) AS variant_count,
         COALESCE(SUM(inv.quantity), 0) AS total_stock,
+
+        -- Average Rating and Total Review Count
+        COALESCE(ROUND(AVG(r.rating), 1), 0.0) AS average_rating,
+        COUNT(DISTINCT r.id) AS total_reviews,
+
         -- New taxable_price index (Base Price + Tax)
         -- Fixed taxable_price calculation (Checks discounted_price first)
         ROUND(
@@ -188,6 +193,7 @@ exports.getProducts = async (req, res) => {
       LEFT JOIN distributor_inventory inv ON 
       inv.product_id = p.id AND 
       (inv.variant_id = v.id OR (inv.variant_id IS NULL AND v.id IS NULL))
+      LEFT JOIN public.e_reviews r ON p.id = r.product_id
       ${whereClause}
       -- Added t.tax_percentage to GROUP BY to allow price calculation
       GROUP BY p.id, c.name, t.id, t.tax_name, t.tax_percentage
@@ -1015,6 +1021,7 @@ exports.getProductByslug = async (req, res) => {
           'cat_id', p.cat_id,
           'name', p.name,
           'description', p.description,
+          'short_desc', p.short_desc,
           'slug', p.slug,
           'f_image', p.f_image,
           'g_image', p.g_image,

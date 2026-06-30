@@ -46,7 +46,7 @@ async function copyTemplateToUserCard(userId) {
 }
 
 async function generateIdCardQr({ userId, businessLevel }) {
-  const appUrl = process.env.APP_URL || "http://localhost:5000";
+  const appUrl = process.env.WEB_URL || "http://localhost:5000";
 
   // QR points to a verify endpoint that should read latest level from DB.
   // Backend must expose: GET /id/verify?userId=<id>
@@ -242,7 +242,7 @@ async function generateAndSaveIdCard({
         // Chosen below ribbon area; if it overlaps your template, tweak Y.
         ctx.fillStyle = "#1A1A1B";
         ctx.font = "bold 26px Arial";
-        ctx.fillText(dateRange, 370, 805);
+        ctx.fillText(dateRange, 390, 805);
       }
     }
 

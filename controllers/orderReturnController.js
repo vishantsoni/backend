@@ -478,11 +478,6 @@ exports.refundForReturn = async (req, res) => {
       throw new Error("Invalid refund amount");
     }
 
-    // order_for based refund routing
-    // - admin-distributor = distributor -> admin
-    // - admin = ecom_user -> admin
-    // - distributor_% = ecom_user -> distributor
-    // Also check payment method: razorpay | COD
     const orderFor =
       typeof order.order_for === "string" ? order.order_for : null;
     const paymentMethod =
@@ -493,27 +488,14 @@ exports.refundForReturn = async (req, res) => {
       paymentMethod.toUpperCase() === "COD" ||
       paymentMethod.toLowerCase() === "cod";
 
-    // If payment was COD, we must refund to wallet (no gateway refund).
-    // If payment was Razorpay, refund should go back to correct party (admin/distributor).
-    // Current implementation supports only wallet refund; Razorpay refund remains no-op.
-
-    // Determine refund recipient user_id
     let refundUserId = null;
     console.log("order  - ", order);
 
     if (orderFor === "admin-distributor") {
-      // distributor -> admin
-      // order user is distributor; refund should go to admin (super-admin role user)
-      // We don't have admin_id in schema here, so pick first admin user.
-
       refundUserId = order.distributor_id;
     } else if (orderFor === "admin") {
       refundUserId = order.user_id;
     } else if (orderFor && orderFor.startsWith("distributor_")) {
-      // ecom_user -> distributor
-      // distributor_% stores distributor user id after underscore
-      // const distId = parseInt(orderFor.replace("distributor_", ""));
-      // refundUserId = isNaN(distId) ? null : distId;
       refundUserId = order.user_id;
     }
 
@@ -524,7 +506,6 @@ exports.refundForReturn = async (req, res) => {
     }
 
     if (isCOD || !isRazorpay) {
-      // COD (or unknown payment method) => wallet refund
       await refundToWallet(client, {
         userId: refundUserId,
         amount,
@@ -532,25 +513,20 @@ exports.refundForReturn = async (req, res) => {
         returnId: r.id,
       });
     } else {
-      // Razorpay => currently no-op integration, but route recipient correctly by wallet fallback
-      // If gateway refund integration isn't implemented, wallet fallback is safer for COD only.
-      // For Razorpay we keep no-op to avoid wrong wallet refunds.
       await refundToRazorpay(client, {
         order,
         returnId: r.id,
         amount,
         refundUserId,
       });
-
-      // If you want to fallback to wallet for Razorpay as well, uncomment below.
-      // await refundToWallet(client, { userId: refundUserId, amount, orderId: r.order_id, returnId: r.id });
     }
 
+    // FIXED: Added explicit typecast ($1::text) to resolve Postgres type ambiguity
     const updateRes = await client.query(
       `UPDATE order_returns
        SET refund_status = 'completed',
            refunded_at = CURRENT_TIMESTAMP,
-           admin_remarks = COALESCE(admin_remarks, '') || CASE WHEN $1 IS NULL THEN '' ELSE (' | ' || $1) END
+           admin_remarks = COALESCE(admin_remarks, '') || CASE WHEN $1::text IS NULL THEN '' ELSE (' | ' || $1::text) END
        WHERE id = $2
        RETURNING *`,
       [admin_remarks || null, parseInt(returnId)],
@@ -565,6 +541,7 @@ exports.refundForReturn = async (req, res) => {
     });
   } catch (err) {
     await client.query("ROLLBACK");
+    console.log("err in refund - ", err);
 
     res.status(400).json({ success: false, message: err.message });
   } finally {

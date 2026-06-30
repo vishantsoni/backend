@@ -461,3 +461,56 @@ exports.login = async (req, res) => {
     res.status(500).json({ status: false, message: "Server Error" });
   }
 };
+
+// get user by id
+exports.getUserById = async (req, res) => {
+  // Destructure phone and email from body in case identifier is just a label
+  const { user_id } = req.params;
+
+  try {
+    const userResult = await db.query(
+      `SELECT u.*, 
+        c.name AS city_name, 
+        s.name AS state_name,
+        COALESCE(r.name, 'user') as role_name, 
+        COALESCE(r.permissions, '[]'::JSONB) as role_permissions 
+        FROM users u 
+        LEFT JOIN roles r ON u.role_id = r.id 
+        LEFT JOIN cities c ON u.city::integer = c.id 
+        LEFT JOIN states s ON u.state::integer = s.id
+        WHERE u.id = $1 LIMIT 1`,
+      [user_id],
+    );
+
+    if (userResult.rows.length === 0) {
+      return res
+        .status(202)
+        .json({ status: false, message: "Invalid credentials" });
+    }
+
+    const user = userResult.rows[0];
+
+    // 5. Get Profile Pic
+    const profile = await db.query(
+      "SELECT file_url FROM kyc_documents WHERE user_id = $1 AND document_type = 'profile' LIMIT 1",
+      [user.id],
+    );
+
+    // FIX: Removed .toObject() because it's PG, not Mongoose
+    // Also remove sensitive data before sending to frontend
+    const { password_hash, transaction_pin_hash, ...safeUser } = user;
+
+    const userWithPic = {
+      ...safeUser,
+      profile_pic: profile.rows[0]?.file_url || null,
+    };
+
+    res.json({
+      status: true,
+      user: userWithPic,
+    });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ status: false, message: "Server Error" });
+  }
+};

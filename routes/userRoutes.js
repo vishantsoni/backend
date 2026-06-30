@@ -10,8 +10,11 @@ const {
   updateKycRequest,
 } = require("../controllers/kycRequestController");
 const authMiddleware = require("../middleware/authMiddleware");
+const multer = require("multer");
+const { getUserById } = require("../controllers/authController");
 
 router.get("/all", [auth, isSuperAdmin], userController.getAllUsers);
+router.get("/by_id/:user_id", getUserById);
 router.get("/downline", auth, userController.getMyDownline);
 router.put("/downline/:id", [auth, isSuperAdmin], userController.updateMember);
 router.get("/tree", auth, userController.getMyTree);
@@ -31,7 +34,6 @@ router.post("/reset-password", userController.resetPassword);
 // KYC routes
 router.get("/kyc-status", kycMiddleware, userController.getKycStatus);
 
-const multer = require("multer");
 const kycUpload = multer({
   storage: multer.memoryStorage(),
   limits: { fileSize: 5 * 1024 * 1024 },
