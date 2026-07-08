@@ -61,6 +61,7 @@ async function fileExists(filePath) {
 }
 
 async function getOrCreateInvoicePdf({ order, force = false }) {
+  // console.log("Generating invoice PDF for order:", order);
   const appUrl = process.env.APP_URL || "";
   const orderIdStr = String(order.id || "");
   const u = safeSegment(order.user_id || order.distributor_id || "guest");

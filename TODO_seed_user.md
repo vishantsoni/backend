@@ -1,0 +1,7 @@
+- [ ] Inspect current `scripts/seed-user.js` and DB schema expectations.
+- [ ] Implement parameterized fast user seeder in `scripts/seed-user.js`.
+- [ ] Add CLI args: --count, --referrerPhone, --password, --startingPhone, --fullNamePrefix.
+- [ ] Fix missing imports (crypto) and improve transaction handling.
+- [ ] Ensure wallet row is created per user.
+- [ ] Add QR generation only when requested (or disabled by default) to keep seeding fast.
+- [ ] Test by running: node scripts/seed-user.js --count 2 --referrerPhone <adminPhone>

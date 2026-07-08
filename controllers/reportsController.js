@@ -874,6 +874,7 @@ exports.exportGSTReportExcel = async (req, res) => {
         o.order_id,
         o.created_at,
         COALESCE(u.name, d.full_name, d.username) as customer_name,
+        COALESCE(NULLIF(d.gstin, ''), 'N/A') AS gstin,
         CASE WHEN o.order_for LIKE 'distributor_%' THEN 'B2B' ELSE 'B2C' END as type,
         o.order_status,
         
@@ -942,6 +943,7 @@ exports.exportGSTReportExcel = async (req, res) => {
       { header: "Order ID", key: "order_id", width: 20 },
       { header: "Date", key: "created_at", width: 15 },
       { header: "Customer", key: "customer_name", width: 25 },
+      { header: "GSTIN", key: "gstin", width: 25 },
       { header: "Type", key: "type", width: 10 },
       { header: "Order Status", key: "order_status", width: 15 },
       { header: "Variant SKU", key: "product_name", width: 25 },

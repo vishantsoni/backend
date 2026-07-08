@@ -161,16 +161,16 @@ exports.getProducts = async (req, res) => {
       `
       SELECT 
         p.*, 
-        c.name as category_name,        
-        COUNT(v.id) AS variant_count,
+        -- Fallback to 'Uncategorized' if the category doesn't exist
+        COALESCE(c.name, 'Uncategorized') as category_name,        
+        COUNT(DISTINCT v.id) AS variant_count, -- Changed to DISTINCT to prevent inflation from other joins
         COALESCE(SUM(inv.quantity), 0) AS total_stock,
 
         -- Average Rating and Total Review Count
         COALESCE(ROUND(AVG(r.rating), 1), 0.0) AS average_rating,
         COUNT(DISTINCT r.id) AS total_reviews,
 
-        -- New taxable_price index (Base Price + Tax)
-        -- Fixed taxable_price calculation (Checks discounted_price first)
+        -- Taxable price calculation
         ROUND(
           CASE 
             WHEN p.discounted_price > 0 THEN p.discounted_price 
@@ -188,14 +188,13 @@ exports.getProducts = async (req, res) => {
         END AS tax_data
       FROM products p 
       LEFT JOIN pro_variants v ON p.id = v.product_id
-      JOIN categories c ON p.cat_id = c.id
+      LEFT JOIN categories c ON p.cat_id = c.id -- Changed from JOIN to LEFT JOIN
       LEFT JOIN tax_settings t ON p.tax_id = t.id
       LEFT JOIN distributor_inventory inv ON 
-      inv.product_id = p.id AND 
-      (inv.variant_id = v.id OR (inv.variant_id IS NULL AND v.id IS NULL))
+        inv.product_id = p.id AND 
+        (inv.variant_id = v.id OR (inv.variant_id IS NULL AND v.id IS NULL))
       LEFT JOIN public.e_reviews r ON p.id = r.product_id
       ${whereClause}
-      -- Added t.tax_percentage to GROUP BY to allow price calculation
       GROUP BY p.id, c.name, t.id, t.tax_name, t.tax_percentage
       ORDER BY p.id ASC
       `,

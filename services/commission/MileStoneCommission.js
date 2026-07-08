@@ -26,25 +26,25 @@ const MilestonDistribution = async (
     if (milestoneQuery.rows.length > 0) {
       const milestone = milestoneQuery.rows[0];
 
-      try {
-        const userInfo = await db.query(
-          "SELECT u.id, u.full_name,u.referral_code, u.phone, u.business_level, l.level_name FROM users u left join level_commissions l on l.level_no = u.business_level WHERE u.id = $1",
-          [userId],
-        );
+      // try {
+      //   const userInfo = await db.query(
+      //     "SELECT u.id, u.full_name,u.referral_code, u.phone, u.business_level, l.level_name FROM users u left join level_commissions l on l.level_no = u.business_level WHERE u.id = $1",
+      //     [userId],
+      //   );
 
-        const user = userInfo.rows[0];
+      //   const user = userInfo.rows[0];
 
-        // await generateAndSaveIdCard({
-        //   userId,
-        //   businessLevel: user.level_name,
-        //   fullName: user?.full_name,
-        //   referralCode: user?.referral_code,
-        //   phone: user?.phone,
-        // });
-      } catch (e) {
-        // Do not fail order/commission if ID generation fails
-        console.error("ID card generation failed:", e);
-      }
+      //   // await generateAndSaveIdCard({
+      //   //   userId,
+      //   //   businessLevel: user.level_name,
+      //   //   fullName: user?.full_name,
+      //   //   referralCode: user?.referral_code,
+      //   //   phone: user?.phone,
+      //   // });
+      // } catch (e) {
+      //   // Do not fail order/commission if ID generation fails
+      //   console.error("ID card generation failed:", e);
+      // }
 
       // reward_cash and cash_com are stored as percentage now.
       // Calculate actual amounts FIRST, then credit wallets/transactions.

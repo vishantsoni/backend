@@ -33,7 +33,7 @@ async function generateInvoice(req, res) {
         COALESCE(u.name, d.full_name, d.username) as user_name, 
         COALESCE(u.phone, d.phone) as user_phone,
         COALESCE(u.email, d.email) as user_email,
-        COALESCE('-', d.gstin) as user_gstin,
+        COALESCE(d.gstin, 'N/A') as user_gstin,
         CASE 
           WHEN o.distributor_id IS NOT NULL THEN 
             JSON_BUILD_OBJECT(

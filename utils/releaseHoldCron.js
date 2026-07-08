@@ -18,7 +18,7 @@ async function releaseHeldCommissions() {
       FROM transactions 
       WHERE status = 'pending' 
         AND remarks LIKE 'Self purchase cashback%' 
-        AND created_at <= NOW() - INTERVAL '5 min';
+        AND created_at <= NOW() - INTERVAL '1 min';
     `;
 
     const TransRes = await client.query(query);
@@ -30,6 +30,7 @@ async function releaseHeldCommissions() {
 
     const allTransaction = TransRes.rows;
     console.log(`Found ${allTransaction.length} transactions to process.`);
+    let updateLevel = false;
 
     for (let tran of allTransaction) {
       // Safe splitting for order_id
@@ -37,6 +38,7 @@ async function releaseHeldCommissions() {
       const order_id = remarkParts[1];
 
       if (!order_id) {
+        updateLevel = false;
         console.error(
           `Skipping Transaction ID ${tran.id}: Order ID not found in remarks.`,
         );
@@ -94,7 +96,9 @@ async function releaseHeldCommissions() {
           console.log(
             `Successfully released commission for User ID: ${tran.user_id}, Txn ID: ${tran.id}`,
           );
+          updateLevel = true;
         } else {
+          updateLevel = false;
           // If order is cancelled/refunded, you might want to fail/cancel this transaction
           console.log(
             `Order ${order_id} was cancelled/refunded. Skipping commission release.`,
@@ -102,11 +106,21 @@ async function releaseHeldCommissions() {
           await client.query("ROLLBACK");
         }
       } catch (loopError) {
+        updateLevel = false;
         // Agar kisi ek user ke process me error aaye, toh sirf uska ROLLBACK hoga, baaki chalte rahenge
         await client.query("ROLLBACK");
         console.error(`Error processing Transaction ID ${tran.id}:`, loopError);
       }
     }
+
+    // update business level
+    // if (updateLevel) {
+    //   console.log("Updating business levels for all users...");
+    //   // Assuming you have a function to update business levels for all users
+    //   const query = `UPDATE users SET business_level = business_level + 1 WHERE id = $1;`;
+    //   await client.query(query, []);
+    //   console.log("Business levels updated successfully.");
+    // }
   } catch (error) {
     console.error("Pending commission cron critical error: ", error);
   } finally {

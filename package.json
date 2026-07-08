@@ -8,6 +8,7 @@
     "migrate": "node scripts/run-migration.js",
     "seed": "node scripts/seed-data.js",
     "admin": "node scripts/seed-admin.js",
+    "c-user": "node scripts/seed-user.js",
     "inventory": "node scripts/seed-main-store-inventory.js"
   },
   "dependencies": {

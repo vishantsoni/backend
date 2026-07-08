@@ -4,6 +4,16 @@ const LevelCommissionDistribution = async (client, userId, body) => {
   try {
     const { amount, razorpay_order_id, order_id } = body;
 
+    // ==========================
+    // VERBOSE LOGS (test only)
+    // ==========================
+    console.log("[LevelCommissionDistribution] START", {
+      userId,
+      amount,
+      order_id,
+      razorpay_order_id,
+    });
+
     // user data & upline traversal
     const userDataRes = await client.query(
       "SELECT binary_path, nlevel(binary_path) as depth FROM users WHERE id = $1",
@@ -15,6 +25,12 @@ const LevelCommissionDistribution = async (client, userId, body) => {
     const currentUserPath = userDataRes.rows[0].binary_path;
     const newUserDepth = userDataRes.rows[0].depth;
 
+    console.log("[LevelCommissionDistribution] userData", {
+      userId,
+      currentUserPath,
+      newUserDepth,
+    });
+
     const uplineQuery = await client.query(
       `SELECT id, binary_path, nlevel(binary_path) as level
        FROM users
@@ -24,7 +40,17 @@ const LevelCommissionDistribution = async (client, userId, body) => {
     );
     const uplines = uplineQuery.rows;
 
+    console.log("[LevelCommissionDistribution] uplines", {
+      count: uplines.length,
+      uplines: uplines.map((u) => ({
+        id: u.id,
+        level: u.level,
+        binary_path: u.binary_path,
+      })),
+    });
+
     // main matching loop
+
     for (let upline of uplines) {
       const isLeft = currentUserPath.startsWith(`${upline.binary_path}.1`);
       const legColumn = isLeft ? "left_count" : "right_count";
@@ -32,7 +58,16 @@ const LevelCommissionDistribution = async (client, userId, body) => {
         ? `${upline.binary_path}.2`
         : `${upline.binary_path}.1`;
 
+      console.log("\n[LevelCommissionDistribution] Upline iteration", {
+        uplineId: upline.id,
+        uplineLevel: upline.level,
+        isLeft,
+        legColumn,
+        oppositeLegPath,
+      });
+
       // A. Wallet Counter Update (Old Logic)
+
       const walletUpdate = await client.query(
         `UPDATE wallets SET ${legColumn} = ${legColumn} + 1
          WHERE user_id = $1 RETURNING left_count, right_count, paid_pairs`,
@@ -40,6 +75,15 @@ const LevelCommissionDistribution = async (client, userId, body) => {
       );
 
       const { left_count, right_count, paid_pairs } = walletUpdate.rows[0];
+
+      console.log("[LevelCommissionDistribution] walletCounterUpdate", {
+        uplineId: upline.id,
+        left_count,
+        right_count,
+        paid_pairs,
+        currentMatches: Math.min(left_count, right_count),
+        newPairs: Math.min(left_count, right_count) - paid_pairs,
+      });
 
       // B. Pair Verification (Old Logic)
       const currentMatches = Math.min(left_count, right_count);
@@ -54,6 +98,12 @@ const LevelCommissionDistribution = async (client, userId, body) => {
            ORDER BY o.created_at ASC LIMIT 1`,
           [oppositeLegPath],
         );
+
+        console.log("[LevelCommissionDistribution] pendingMatch", {
+          uplineId: upline.id,
+          oppositeLegPath,
+          pendingRows: pendingMatch.rows,
+        });
 
         if (pendingMatch.rows.length > 0) {
           const matchedOrder = pendingMatch.rows[0];
@@ -73,8 +123,34 @@ const LevelCommissionDistribution = async (client, userId, body) => {
           const commissionAmount =
             newPairs * (totalMatchingAmount * (rate / 100));
 
+          console.log("[LevelCommissionDistribution] commissionCalc", {
+            uplineId: upline.id,
+            uplineLevel: upline.level,
+            newUserDepth,
+            relativeLevel,
+            totalMatchingAmount,
+            newPairs,
+            rate,
+            commissionAmount,
+          });
+
           if (commissionAmount > 0) {
+            console.log("[LevelCommissionDistribution] COMMIT commission", {
+              uplineId: upline.id,
+              matchedOrderId: matchedOrder.id,
+              matchedOrderOrderId: matchedOrder.order_id,
+              sourceOrderId: order_id,
+              commissionAmount,
+              currentMatches,
+              relativeLevel,
+              rate,
+            });
             // F. Mark Orders as Paid
+            // Increment business level for this upline when commission becomes payable
+            await client.query(
+              `UPDATE users SET business_level = business_level + 1 WHERE id = $1`,
+              [upline.id],
+            );
             await client.query(
               `UPDATE orders SET commission_status = 'paid' WHERE id = $1`,
               [matchedOrder.id],
@@ -92,6 +168,13 @@ const LevelCommissionDistribution = async (client, userId, body) => {
 
             const updatedPaidPairs = walletUpdateFinal.rows[0].paid_pairs;
 
+            console.log("[LevelCommissionDistribution] walletUpdateFinal", {
+              uplineId: upline.id,
+              updatedPaidPairs,
+              currentMatches,
+              commissionAmount,
+            });
+
             // --- INTEGRATION START: Milestone Check ---
             // This checks if the user hit any milestone based on their new paid_pairs count
             await MilestonDistribution(
@@ -103,20 +186,32 @@ const LevelCommissionDistribution = async (client, userId, body) => {
             );
             // --- INTEGRATION END ---
 
+            const txnRemarks = `Pair Match: Order ${matchedOrder.order_id} & ${order_id}`;
+
+            console.log("[LevelCommissionDistribution] insert transaction", {
+              uplineId: upline.id,
+              commissionAmount,
+              source_user_id: userId,
+              txnRemarks,
+            });
+
             await client.query(
               `INSERT INTO transactions (user_id, amount, type, category, source_user_id, status, remarks)
                VALUES ($1, $2, 'credit', 'commission', $3, 'completed', $4)`,
-              [
-                upline.id,
-                commissionAmount,
-                userId,
-                `Pair Match: Order ${matchedOrder.order_id} & ${order_id}`,
-              ],
+              [upline.id, commissionAmount, userId, txnRemarks],
             );
           }
         }
       } else {
         // Agar pair nahi bana, toh order ko pending mark karein
+        console.log(
+          "[LevelCommissionDistribution] no newPairs -> mark pending",
+          {
+            uplineId: upline.id,
+            order_id,
+            legColumn,
+          },
+        );
         await client.query(
           `UPDATE orders SET commission_status = 'pending' WHERE order_id = $1`,
           [order_id],
@@ -124,7 +219,7 @@ const LevelCommissionDistribution = async (client, userId, body) => {
       }
     }
   } catch (err) {
-    console.log("Level commission error log - ", err);
+    console.log("[LevelCommissionDistribution] ERROR", err);
   }
 };
 

@@ -603,7 +603,7 @@ exports.createUser = async (req, res) => {
     let binaryPath = "1";
     let position = null;
 
-    let calculatedBusinessLevel = 1; // Default for root
+    let calculatedBusinessLevel = 0; // Default for root
 
     if (referrer_id) {
       const referrer = await client.query(
@@ -639,7 +639,7 @@ exports.createUser = async (req, res) => {
       }
 
       binaryPath = `${parent.binary_path}.${position}`;
-      calculatedBusinessLevel = binaryPath.split(".").length;
+      // calculatedBusinessLevel = binaryPath.split(".").length;
     } else {
       // Agar referrer_id nahi hai, toh check karein kya system mein pehle se koi Root hai?
       const rootCheck = await client.query(
@@ -707,13 +707,13 @@ exports.createUser = async (req, res) => {
         username, password_hash, referrer_id,
         node_path, binary_path, position, is_active, gstin
       ) VALUES (
-        $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,
-        $13,$14,$15,$16,$17,
-        $18,$19,$20,
-        $21,$22,$23,$24,$25,
-        $26,$27,$28,
-        $29,$30,$31,
-        $32,$33,$34, $35, $36
+      $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,
+      $13,$14,$15,$16,$17,
+      $18,$19,$20,
+      $21,$22,$23,$24,$25,
+      $26,$27,$28,
+      $29,$30,$31,
+      $32,$33,$34, $35, $36
       ) RETURNING *`,
       [
         full_name || null,
@@ -741,7 +741,7 @@ exports.createUser = async (req, res) => {
         nominee_age,
         nominee_contact || null,
         nominee_aadhaar || null,
-        Number(calculatedBusinessLevel) || 1,
+        0,
         !!agreed_to_terms,
         false,
         username,
@@ -813,6 +813,7 @@ exports.uploadKycDocuments = async (req, res) => {
       "Aadhaar_Back",
       "passbook",
       "profile",
+      "gstin",
     ]; // Allowed types
     const uploadedFiles = [];
 
