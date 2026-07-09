@@ -46,7 +46,7 @@ router.post(
 // Admin approves / rejects return request
 router.put(
   "/returns/:returnId/approve",
-  [authMiddleware, isSuperAdmin],
+  [authMiddleware],
   orderReturnController.adminApproveReturn,
 );
 router.put(
@@ -58,14 +58,14 @@ router.put(
 // Warehouse confirms receipt (inventory restored here)
 router.post(
   "/returns/:returnId/receive",
-  [authMiddleware, isSuperAdmin],
+  [authMiddleware],
   orderReturnController.warehouseReceiveReturn,
 );
 
 // Admin/refund wallet after received
 router.post(
   "/returns/:returnId/refund",
-  [authMiddleware, isSuperAdmin],
+  [authMiddleware],
   orderReturnController.refundForReturn,
 );
 

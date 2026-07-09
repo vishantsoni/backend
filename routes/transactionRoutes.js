@@ -6,6 +6,7 @@ const authMiddleware = require("../middleware/authMiddleware");
 // const kycMiddleware = require("../middleware/kycMiddleware"); // unused
 
 const isSuperAdmin = require("../middleware/isSuperAdmin");
+const checkTransaction = require("../middleware/settingMiddleware");
 
 // Transaction PIN & OTP
 router.post("/verify-pin", authMiddleware, transactionController.verifyPin);
@@ -20,7 +21,7 @@ router.post("/change-password", authMiddleware, userController.changePassword);
 router.post("/transfer", authMiddleware, transactionController.transferToUser);
 router.post(
   "/add-transaction",
-  [authMiddleware, isSuperAdmin],
+  [authMiddleware, isSuperAdmin, checkTransaction],
   transactionController.addTransaction,
 );
 router.post("/withdraw", authMiddleware, transactionController.withdraw);

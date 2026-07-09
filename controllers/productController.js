@@ -263,13 +263,6 @@ exports.getProductsForDistributor = async (req, res) => {
     let whereClause = "WHERE 1=1";
     const values = [];
 
-    // Handling Status Filter
-    // if (status !== "all") {
-    //   values.push(status);
-    //   whereClause += ` AND p.status = $${values.length}`;
-    // } else {
-    //   whereClause += " AND p.status IN ('active', 'inactive', 'trash')";
-    // }
     if (status) {
       if (status === "all") {
         whereClause += " AND p.status IN ('active')";
@@ -307,7 +300,11 @@ exports.getProductsForDistributor = async (req, res) => {
           'subcategories', p.subcategories,
           'attributes', p.attributes,
           'status', p.status,
-          'created_at', p.created_at
+          'created_at', p.created_at,
+          -- Average Rating and Total Review Count
+          'average_rating', COALESCE(ROUND(AVG(r.rating), 1), 0.0) ,
+          'total_reviews', COUNT(DISTINCT r.id)
+          
         ) AS product,
         
         jsonb_build_object(
@@ -383,6 +380,7 @@ exports.getProductsForDistributor = async (req, res) => {
       LEFT JOIN categories c ON p.cat_id = c.id
       LEFT JOIN pro_variants v2 ON p.id = v2.product_id
       LEFT JOIN tax_settings t ON p.tax_id = t.id
+      LEFT JOIN public.e_reviews r ON p.id = r.product_id
       ${whereClause}
       GROUP BY p.id, c.id, t.id, c.name, c.slug, t.tax_percentage, t.tax_name
     `;
@@ -1192,7 +1190,7 @@ exports.updateProduct = async (req, res) => {
     const values = [];
     let paramIndex = 1;
 
-    const uploadDir = pathModule.join("uploads", "products", slug);
+    const uploadDir = pathModule.join("uploads", "products", slug ?? "");
     await fs.mkdir(uploadDir, { recursive: true });
 
     if (name !== undefined) {
