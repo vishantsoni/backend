@@ -155,6 +155,8 @@ exports.getProducts = async (req, res) => {
         whereClause += ` AND p.status = $${values.length + 1}`;
         values.push(status);
       }
+    } else {
+      whereClause += " AND p.status IN ('active')";
     }
 
     const result = await db.query(

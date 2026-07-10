@@ -920,7 +920,11 @@ exports.addTransaction = async (req, res) => {
       });
     }
 
-    const allowedWalletFields = ["total_amount", "company_fund"];
+    const allowedWalletFields = [
+      "total_amount",
+      "company_fund",
+      "withdrawable_amount",
+    ];
     if (!allowedWalletFields.includes(deduction_from)) {
       return res.status(400).json({
         success: false,
@@ -949,16 +953,22 @@ exports.addTransaction = async (req, res) => {
     const finalStatus = status ? String(status) : "completed";
 
     const field = String(deduction_from);
+    // For this admin/manual endpoint, treat:
+    // - type=credit => increase the given wallet field
+    // - type=debit  => decrease the given wallet field
     const sign = finalType === "credit" ? 1 : -1;
 
     const client = await db.connect();
     try {
       await client.query("BEGIN");
 
-      // Lock wallet row
+      // Lock wallet row (must include deduction_from column so currentVal is computed correctly)
       const walletRes = await client.query(
         `
-          SELECT total_amount, pending_amount, company_fund
+          SELECT total_amount,
+                 pending_amount,
+                 company_fund,
+                 withdrawable_amount
           FROM wallets
           WHERE user_id = $1
           FOR UPDATE
@@ -986,13 +996,24 @@ exports.addTransaction = async (req, res) => {
       }
 
       // Update the correct wallet column
-      await client.query(
-        `UPDATE wallets
+      const query = `UPDATE wallets
          SET ${field} = ${field} + $1,
              updated_at = CURRENT_TIMESTAMP
-         WHERE user_id = $2`,
-        [sign * amountNum, userId],
-      );
+         WHERE user_id = $2`;
+      console.log("query - ", query);
+
+      const updateWallet = await client.query(query, [
+        sign * amountNum,
+        userId,
+      ]);
+
+      if (updateWallet.rowCount === 0) {
+        await client.query("ROLLBACK");
+        return res.status(404).json({
+          success: false,
+          error: "Wallet not found for user",
+        });
+      }
 
       // Insert transaction record (using existing columns pattern from this controller)
       const txnInsert = await client.query(
@@ -1015,7 +1036,7 @@ exports.addTransaction = async (req, res) => {
 
       // Return updated wallet snapshot
       const updatedWalletRes = await db.query(
-        `SELECT total_amount, pending_amount, company_fund FROM wallets WHERE user_id = $1`,
+        `SELECT total_amount, pending_amount, company_fund, withdrawable_amount FROM wallets WHERE user_id = $1`,
         [userId],
       );
 
