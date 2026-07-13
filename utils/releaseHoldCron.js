@@ -82,6 +82,20 @@ async function releaseHeldCommissions() {
             [tranAmount, tran.user_id],
           );
 
+          // self bima booking 1%
+          const bimaBookingAmount = parseFloat(sub_total) * 0.01;
+
+          await client.query(
+            `INSERT INTO transactions (user_id, amount, type, category, source_user_id, status, remarks)
+               VALUES ($1, $2, 'credit', 'other', $3, 'completed', $4)`,
+            [
+              tran.user_id,
+              bimaBookingAmount,
+              tran.user_id,
+              "BIMA Booking Commission",
+            ],
+          );
+
           // 5. Distribute Level Commission (Passing fetched order details)
           await LevelCommissionDistribution(client, tran.user_id, {
             amount: sub_total,
