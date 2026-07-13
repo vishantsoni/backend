@@ -308,6 +308,7 @@ exports.getProductsForDistributor = async (req, res) => {
           'total_reviews', COUNT(DISTINCT r.id)
           
         ) AS product,
+
         
         jsonb_build_object(
           'id', c.id, 
@@ -376,13 +377,17 @@ exports.getProductsForDistributor = async (req, res) => {
           WHERE v.product_id = p.id
         ), '[]'::jsonb) AS variants,
         
-        COUNT(v2.id) AS variant_count
+        COUNT(v2.id) AS variant_count,
+        -- FIX 2: Safely SUM total inventory allocations without joining structural rows
+        COALESCE((SELECT SUM(quantity) FROM distributor_inventory WHERE product_id = p.id AND distributor_id = 0), 0) AS total_stock
+
         
       FROM products p 
       LEFT JOIN categories c ON p.cat_id = c.id
       LEFT JOIN pro_variants v2 ON p.id = v2.product_id
       LEFT JOIN tax_settings t ON p.tax_id = t.id
       LEFT JOIN public.e_reviews r ON p.id = r.product_id
+      
       ${whereClause}
       GROUP BY p.id, c.id, t.id, c.name, c.slug, t.tax_percentage, t.tax_name
     `;

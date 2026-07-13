@@ -318,6 +318,17 @@ exports.d_p_o = async (req, res) => {
            updated_at = CURRENT_TIMESTAMP`,
         [userId, item.product_id, item.variant_id || null, item.qty],
       );
+
+      // update super admin inventory
+      await client.query(
+        `
+        UPDATE distributor_inventory SET
+          quantity = quantity - $1,
+          updated_at = CURRENT_TIMESTAMP
+        WHERE distributor_id = 0 AND product_id = $2 AND COALESCE(variant_id, 0) = COALESCE($3, 0)
+      `,
+        [item.qty, item.product_id, item.variant_id || null],
+      );
     }
 
     await client.query("COMMIT");
