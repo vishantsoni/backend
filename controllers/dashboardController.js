@@ -35,9 +35,9 @@ exports.getUserDashboardData = async (req, res) => {
     const walletBalance = await safeQuery(
       `
       SELECT 
-        COALESCE(total_amount, 0)::numeric(15,2) as total_balance,
-        COALESCE(pending_amount, 0)::numeric(15,2) as pending_balance,
-        (COALESCE(total_amount, 0) + COALESCE(pending_amount, 0))::numeric(15,2) as available_balance
+        (COALESCE(total_amount, 0) / 10.0) as total_balance,        
+        (COALESCE(pending_amount, 0) / 10.0) as pending_balance,        
+        ((COALESCE(total_amount, 0) + COALESCE(pending_amount, 0)) / 10.0) as available_balance
       FROM wallets
       WHERE user_id = $1
       `,
