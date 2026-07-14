@@ -218,15 +218,6 @@ const LevelCommissionDistribution = async (client, userId, body) => {
               commissionAmount,
             });
 
-            // SECTION H: Side-Effects Processing (Milestones, Transactions, Mapping Records)
-            await MilestonDistribution(
-              client,
-              upline.id,
-              updatedPaidPairs,
-              newPairs,
-              totalMatchingAmount,
-            );
-
             const txnRemarks = `Pair Match: Order ${matchedOrder.order_id} & ${order_id} | Rate - ${rate}%`;
 
             console.log("[LevelCommissionDistribution] insert transaction", {
@@ -271,6 +262,15 @@ const LevelCommissionDistribution = async (client, userId, body) => {
                 commissionAmount,
                 relativeLevel,
               ],
+            );
+
+            // SECTION H: Side-Effects Processing (Milestones, Transactions, Mapping Records)
+            await MilestonDistribution(
+              client,
+              upline.id,
+              updatedPaidPairs,
+              newPairs,
+              totalMatchingAmount,
             );
           }
         }

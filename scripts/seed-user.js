@@ -92,9 +92,9 @@ async function createWallet(client, userId) {
 async function seedUsers() {
   const count = parseInt(getArgValue("--count", "1"), 10);
   const password = getArgValue("--password", "12345678");
-  const referrerPhone = getArgValue("--referrerPhone", "9999999996");
-  const startingPhone = getArgValue("--startingPhone", "9999999914");
-  const fullNamePrefix = getArgValue("--fullNamePrefix", "User Fourteen");
+  const referrerPhone = getArgValue("--referrerPhone", "8130124630");
+  const startingPhone = getArgValue("--startingPhone", "9999999992");
+  const fullNamePrefix = getArgValue("--fullNamePrefix", "User 2");
   const skipQr = hasFlag("--skipQr"); // currently unused (QR generation is intentionally not done for speed)
 
   if (!Number.isFinite(count) || count <= 0) {

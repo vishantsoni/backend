@@ -38,7 +38,7 @@ const MilestonDistribution = async (
 
     const milestone = milestoneQuery.rows[0];
     const targetLevelNo = milestone.level_no; // जैसे FAD के लिए level_no = 2 या 3 जो भी टेबल में हो
-    const requiredPairsForThisLevel = milestone.team_size; // उस लेयर को पूरा करने के लिए जरूरी पेयर्स (e.g., 4 या 8)
+    const requiredPairsForThisLevel = parseInt(milestone.team_size) / 2; // उस लेयर को पूरा करने के लिए जरूरी पेयर्स (e.g., 4 या 8)
 
     // 3. 🔥 MAGIC HAPPENS HERE: pair_matches टेबल से चेक करें कि इस विशिष्ट
     // relative level (pair_level) पर यूजर के नीचे वास्तव में कितने पेयर्स कम्प्लीट हो चुके हैं
